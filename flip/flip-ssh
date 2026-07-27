@@ -1,0 +1,11 @@
+#!/usr/bin/expect -f
+# ssh naar de Knulli-Flip (dropbear accepteert onze key niet door exFAT-permissies)
+set timeout 60
+set cmd [join $argv " "]
+spawn ssh -o StrictHostKeyChecking=accept-new root@192.168.1.144 $cmd
+expect {
+    "password:" { send "linux\r"; exp_continue }
+    eof
+}
+foreach {pid spawnid os_error_flag value} [wait] break
+exit $value

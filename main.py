@@ -37,16 +37,30 @@ HAT_KEYS = {(0, 1): pygame.K_UP, (0, -1): pygame.K_DOWN,
             (-1, 0): pygame.K_LEFT, (1, 0): pygame.K_RIGHT}
 
 
+_axis_state = {}
+
+
 def pad_translate(ev):
-    """Gamepad-event -> synthetisch KEYDOWN-event (of None)."""
+    """Gamepad-event -> synthetisch KEYDOWN-event (of None).
+    Logt elke knop/as naar stdout voor kalibratie op nieuwe apparaten."""
     if ev.type == pygame.JOYBUTTONDOWN:
+        print(f"pad: button {ev.button}")
         k = PAD_BUTTONS.get(ev.button)
-        if k is None:
-            print(f"pad: unmapped button {ev.button}")
-            return None
-        return pygame.event.Event(pygame.KEYDOWN, key=k)
+        return pygame.event.Event(pygame.KEYDOWN, key=k) if k else None
     if ev.type == pygame.JOYHATMOTION and ev.value in HAT_KEYS:
         return pygame.event.Event(pygame.KEYDOWN, key=HAT_KEYS[ev.value])
+    if ev.type == pygame.JOYAXISMOTION:
+        prev = _axis_state.get(ev.axis, 0)
+        cur = 1 if ev.value > 0.6 else (-1 if ev.value < -0.6 else 0)
+        _axis_state[ev.axis] = cur
+        if cur != prev and cur:
+            print(f"pad: axis {ev.axis} {'+' if cur > 0 else '-'}")
+            if ev.axis in (0, 2):
+                return pygame.event.Event(
+                    pygame.KEYDOWN, key=pygame.K_RIGHT if cur > 0 else pygame.K_LEFT)
+            if ev.axis in (1, 3):
+                return pygame.event.Event(
+                    pygame.KEYDOWN, key=pygame.K_DOWN if cur > 0 else pygame.K_UP)
     return None
 
 _stone_snd = None
