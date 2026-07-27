@@ -707,6 +707,9 @@ def main():
     pygame.joystick.init()
     for i in range(pygame.joystick.get_count()):
         pygame.joystick.Joystick(i).init()
+    print("pad: joysticks at start:", pygame.joystick.get_count(),
+          [pygame.joystick.Joystick(i).get_name()
+           for i in range(pygame.joystick.get_count())])
     shot = "--shot" in sys.argv
     win = pygame.display.set_mode((W * SCALE, H * SCALE))
     pygame.display.set_caption("flip-go")
@@ -729,6 +732,10 @@ def main():
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
                 return
+            if ev.type == pygame.JOYDEVICEADDED:
+                j = pygame.joystick.Joystick(ev.device_index)
+                j.init()
+                print("pad: joystick added:", j.get_name())
             ev = pad_translate(ev) or ev
             if ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
                 if isinstance(scene, TitleScene):
