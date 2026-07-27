@@ -235,6 +235,38 @@ def my_challenges():
     return out
 
 
+# De OGS-bloemenladder (alfabetisch = oplopend in sterkte), ids via active-bots
+FLOWERS = [
+    ("Agapanthus", 1195515),
+    ("Amaranthus", 1200334),
+    ("Bergamot", 1195517),
+    ("Bouvardia", 1278465),
+    ("Carnation", 1195518),
+    ("Deutzia", 1195519),
+    ("Echinops", 1195520),
+]
+
+
+def challenge_player(pid, speed="live", size=9, ranked=True):
+    """Directe challenge naar een speler/bot (zelfde body als open challenge)."""
+    tok = _token()
+    h = dict(UA)
+    h["Authorization"] = f"Bearer {tok['access_token']}"
+    body = {
+        "challenger_color": "automatic",
+        "game": {
+            "name": "flip-go", "rules": "japanese", "ranked": ranked,
+            "width": size, "height": size, "handicap": 0, "komi_auto": "automatic",
+            "disable_analysis": False, "initial_state": None, "private": False,
+            "time_control": "fischer",
+            "time_control_parameters": TIME_CONTROLS[speed],
+        },
+    }
+    r = requests.post(f"{BASE}/players/{pid}/challenge/", json=body, headers=h, timeout=15)
+    r.raise_for_status()
+    return r.json()
+
+
 def cancel_challenge(cid):
     tok = _token()
     h = dict(UA)
