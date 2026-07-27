@@ -439,8 +439,8 @@ class HistoryScene:
         elif not self.rows:
             retro.text_c(s, "No finished games.", W // 2, 110, PAL["text_dim"])
         else:
-            off = max(0, min(self.sel - 4, len(self.rows) - 5))
-            for i, r in enumerate(self.rows[off:off + 5]):
+            off = max(0, min(self.sel - 5, len(self.rows) - 6))
+            for i, r in enumerate(self.rows[off:off + 6]):
                 y = 44 + i * 30
                 retro.dialog_box(s, (16, y, 288, 26))
                 if i + off == self.sel:
