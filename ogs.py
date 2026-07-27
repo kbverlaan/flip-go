@@ -101,19 +101,26 @@ def me():
 
 
 def my_games():
-    """Actieve potten uit het overview. -> lijst {id, black, white, my_turn, size}"""
+    """Actieve potten uit het overview. -> lijst {id, black, white, my_turn, size, speed}"""
     m = me()
     out = []
     for g in api("ui/overview").get("active_games", []):
         gd = g.get("json", {})
         pl = gd.get("players", {})
+        speed = gd.get("time_control", {}).get("speed", "")
+        black = pl.get("black", {})
+        white = pl.get("white", {})
+        i_am_black = black.get("id") == m.get("id")
         out.append({
             "id": g.get("id"),
-            "black": pl.get("black", {}).get("username", "?"),
-            "white": pl.get("white", {}).get("username", "?"),
+            "black": black.get("username", "?"),
+            "white": white.get("username", "?"),
+            "opp": (white if i_am_black else black).get("username", "?"),
+            "my_color": 1 if i_am_black else 2,
             "my_id": m.get("id"),
             "my_turn": gd.get("clock", {}).get("current_player") == m.get("id"),
             "size": gd.get("width", 9),
+            "speed": "daily" if speed == "correspondence" else (speed or "?"),
         })
     return out
 
@@ -122,13 +129,11 @@ def game(gid):
     return api(f"games/{gid}")
 
 
-def submit_move(gid, x, y, size=9):
-    """Zet insturen via de realtime socket (zoals de webclient; REST is dood).
-    Wacht op het move-event van de server als bevestiging."""
+def _game_command(gid, command, payload, confirm_tag):
+    """Socket-transactie: connect, wacht op gamedata, stuur command, wacht op
+    bevestigings-event. Zo doet de webclient het ook (REST-move is dood)."""
     import websocket
     jwt = api("ui/config")["user_jwt"]
-    my_id = me().get("id")
-    mv = chr(97 + x) + chr(97 + y)
     ws = websocket.create_connection("wss://online-go.com/socket", timeout=10,
                                      header=["User-Agent: flip-go/0.1"])
     try:
@@ -142,18 +147,102 @@ def submit_move(gid, x, y, size=9):
                 continue
             tag = m[0]
             if not sent and isinstance(tag, str) and tag.endswith("gamedata"):
-                ws.send(json.dumps(["game/move",
-                                    {"game_id": gid, "player_id": my_id, "move": mv}]))
+                ws.send(json.dumps([command, payload]))
                 sent = True
-            elif sent and tag == f"game/{gid}/move":
-                return m[1]                       # server bevestigt onze zet
-            elif sent and isinstance(tag, str) and tag.endswith("error"):
-                raise RuntimeError(f"server weigerde zet: {m[1]}")
-            elif isinstance(tag, str) and tag == "ERROR":
-                raise RuntimeError(f"socket error: {m[1] if len(m) > 1 else '?'}")
+            elif sent and tag == confirm_tag:
+                return m[1] if len(m) > 1 else {}
+            elif sent and isinstance(tag, str) and (tag.endswith("error") or tag == "ERROR"):
+                raise RuntimeError(f"server weigerde: {m[1] if len(m) > 1 else '?'}")
         raise RuntimeError("geen bevestiging van de server (timeout)")
     finally:
         ws.close()
+
+
+def submit_move(gid, x, y, size=9):
+    mv = ".." if x < 0 else chr(97 + x) + chr(97 + y)
+    return _game_command(gid, "game/move",
+                         {"game_id": gid, "player_id": me().get("id"), "move": mv},
+                         f"game/{gid}/move")
+
+
+def pass_move(gid):
+    return submit_move(gid, -1, -1)
+
+
+def resign(gid):
+    return _game_command(gid, "game/resign", {"game_id": gid}, f"game/{gid}/phase")
+
+
+TIME_CONTROLS = {
+    # fischer: daily = 3d + 1d/zet (cap 7d); live = 2m + 30s/zet (cap 5m)
+    "daily": {"system": "fischer", "time_control": "fischer", "speed": "correspondence",
+              "initial_time": 259200, "time_increment": 86400, "max_time": 604800,
+              "pause_on_weekends": True},
+    "live": {"system": "fischer", "time_control": "fischer", "speed": "live",
+             "initial_time": 120, "time_increment": 30, "max_time": 300,
+             "pause_on_weekends": False},
+}
+
+
+def create_challenge(speed="daily", size=9, ranked=True):
+    """Open 9x9-challenge (japanese, auto-komi). -> challenge-id"""
+    tok = _token()
+    h = dict(UA)
+    h["Authorization"] = f"Bearer {tok['access_token']}"
+    body = {
+        "challenger_color": "automatic",
+        "min_ranking": 0, "max_ranking": 36,
+        "game": {
+            "name": "flip-go", "rules": "japanese", "ranked": ranked,
+            "width": size, "height": size, "handicap": 0, "komi_auto": "automatic",
+            "disable_analysis": False, "initial_state": None, "private": False,
+            "time_control": "fischer",
+            "time_control_parameters": TIME_CONTROLS[speed],
+        },
+    }
+    r = requests.post(f"{BASE}/challenges/", json=body, headers=h, timeout=15)
+    r.raise_for_status()
+    res = r.json()
+    store = _chall_store()
+    store.append({"id": res.get("challenge"), "speed": speed, "size": size})
+    _chall_store(store)
+    return res
+
+
+CHALL_FILE = TOKEN_FILE.parent / "challenges.json"
+
+
+def _chall_store(data=None):
+    if data is not None:
+        CHALL_FILE.write_text(json.dumps(data))
+        return data
+    if CHALL_FILE.exists():
+        return json.loads(CHALL_FILE.read_text())
+    return []
+
+
+def my_challenges():
+    """Eigen openstaande challenges (lokaal bijgehouden — het me/challenges-
+    endpoint toont uitgaande open challenges niet). Server-geverifieerd."""
+    out = []
+    for c in _chall_store():
+        try:
+            api(f"challenges/{c['id']}")
+            out.append(c)
+        except Exception:
+            pass     # geaccepteerd (pot staat dan in de lijst) of verlopen
+    _chall_store(out)
+    return out
+
+
+def cancel_challenge(cid):
+    tok = _token()
+    h = dict(UA)
+    h["Authorization"] = f"Bearer {tok['access_token']}"
+    r = requests.delete(f"{BASE}/challenges/{cid}/", headers=h, timeout=15)
+    if r.status_code not in (200, 204):
+        r.raise_for_status()
+    return True
 
 
 def get_player(username):
