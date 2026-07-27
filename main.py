@@ -76,6 +76,43 @@ def play_stone():
         pass
 
 
+_dev = {"t": 0.0, "v": (None, False, None)}
+
+
+def device_status():
+    """(batterij%, aan lader, wifi) — None = niet beschikbaar (bv. op de Mac)."""
+    now = time.time()
+    if now - _dev["t"] > 5:
+        batt, charging, wifi = None, False, None
+        try:
+            batt = int(open("/sys/class/power_supply/battery/capacity").read().strip())
+            charging = "harging" in open("/sys/class/power_supply/battery/status").read()
+        except Exception:
+            pass
+        try:
+            wifi = any(":" in l and "wlan" in l for l in open("/proc/net/wireless"))
+        except Exception:
+            pass
+        _dev["t"], _dev["v"] = now, (batt, charging, wifi)
+    return _dev["v"]
+
+
+def draw_status(s):
+    """Batterij + wifi als pixel-iconen rechtsboven (alleen op het apparaat)."""
+    batt, charging, wifi = device_status()
+    if batt is not None:
+        col = PAL["accent"] if batt < 20 and not charging else PAL["text_dim"]
+        pygame.draw.rect(s, col, (298, 5, 14, 8), 1)
+        pygame.draw.rect(s, col, (312, 7, 2, 4))
+        w = max(1, 10 * batt // 100)
+        pygame.draw.rect(s, PAL["green"] if charging else col, (300, 7, w, 4))
+    if wifi is True:
+        for i, h in enumerate((2, 4, 6)):
+            pygame.draw.rect(s, PAL["text_dim"], (282 + i * 4, 11 - h, 3, h))
+    elif wifi is False:
+        pygame.draw.rect(s, PAL["accent"], (282, 5, 3, 6))
+
+
 def arrow(s, x, y, color=None):
     """Pokemon-cursor: klein driehoekje."""
     c = color or PAL["text"]
@@ -104,6 +141,8 @@ class TitleScene:
         retro.text_c(s, "an OGS client", W // 2, 38, PAL["text_dim"])
         if (self.t // 30) % 2 == 0:
             retro.text_c(s, "PRESS START", W // 2, 205, PAL["box"])
+        retro.text(s, "Y quit", 4, 228, PAL["text_dim"])
+        draw_status(s)
         self.t += 1
 
 
@@ -186,6 +225,7 @@ class GamesScene:
     def draw(self, s):
         s.fill(PAL["screen"])
         retro.text_c(s, "YOUR GAMES", W // 2, 14, PAL["box"])
+        draw_status(s)
         if self.games is None:
             retro.text_c(s, "loading" + "." * ((self.t // 20) % 4), W // 2, 110, PAL["text_dim"])
             self.t += 1
