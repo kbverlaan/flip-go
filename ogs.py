@@ -175,9 +175,9 @@ def my_history(n=10):
 
 
 # ---------- realtime socket (zetten; REST-move is dood op de server) ----------
-def _game_command(gid, command, payload, confirm_tag):
+def _game_command(gid, command, payload, confirm_tags):
     """Socket-transactie: connect, wacht op gamedata, stuur command, wacht op
-    bevestigings-event. Zo doet de webclient het ook."""
+    een van de bevestigings-events. Zo doet de webclient het ook."""
     global _jwt
     import websocket
     if _jwt is None:
@@ -197,7 +197,7 @@ def _game_command(gid, command, payload, confirm_tag):
             if not sent and isinstance(tag, str) and tag.endswith("gamedata"):
                 ws.send(json.dumps([command, payload]))
                 sent = True
-            elif sent and tag == confirm_tag:
+            elif sent and tag in confirm_tags:
                 return m[1] if len(m) > 1 else {}
             elif sent and isinstance(tag, str) and (tag.endswith("error") or tag == "ERROR"):
                 raise RuntimeError(f"server weigerde: {m[1] if len(m) > 1 else '?'}")
@@ -213,7 +213,7 @@ def submit_move(gid, x, y):
     mv = ".." if x < 0 else chr(97 + x) + chr(97 + y)
     return _game_command(gid, "game/move",
                          {"game_id": gid, "player_id": me().get("id"), "move": mv},
-                         f"game/{gid}/move")
+                         (f"game/{gid}/move",))
 
 
 def pass_move(gid):
@@ -227,11 +227,15 @@ def accept_removal(gid):
     return _game_command(gid, "game/removed_stones/accept",
                          {"game_id": gid, "player_id": me().get("id"),
                           "stones": removed, "strict_seki_mode": False},
-                         f"game/{gid}/removed_stones_accepted")
+                         (f"game/{gid}/removed_stones_accepted",
+                          f"game/{gid}/phase", f"game/{gid}/gamedata"))
 
 
 def resign(gid):
-    return _game_command(gid, "game/resign", {"game_id": gid}, f"game/{gid}/phase")
+    # de server stuurt bij resign geen apart phase-event maar verse gamedata
+    return _game_command(gid, "game/resign", {"game_id": gid},
+                         (f"game/{gid}/phase", f"game/{gid}/gamedata",
+                          f"game/{gid}/conditional_moves"))
 
 
 # ---------- challenges ----------
