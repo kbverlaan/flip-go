@@ -10,6 +10,7 @@ In een pot: S opent het menu (Pass / Resign / Info / Quit).
 import os
 import sys
 import threading
+import time
 
 if "--shot" in sys.argv:
     os.environ["SDL_VIDEODRIVER"] = "dummy"
@@ -103,12 +104,15 @@ class GamesScene:
         self.t = 0
         self.cancelq = None      # challenge-id in bevestiging
         self.stopping = None     # challenge-id die geannuleerd wordt
+        self.me_label = None
         threading.Thread(target=self._load, daemon=True).start()
 
     def _load(self):
         try:
             self.games = ogs.my_games()
             self.seeking = ogs.my_challenges()
+            m = ogs.me()
+            self.me_label = f"{m.get('username')} - {ogs.rank_label(m.get('ranking'))}"
         except Exception:
             self.error = "Offline - mock game"
             self.games = []
@@ -197,6 +201,8 @@ class GamesScene:
                 retro.text(s, "HISTORY", 36, y + 9)
         if self.error:
             retro.text_c(s, self.error, W // 2, 220, PAL["text_dim"])
+        elif self.me_label:
+            retro.text_c(s, self.me_label, W // 2, 226, PAL["text_dim"])
         self.t += 1
 
 
@@ -268,6 +274,16 @@ class BotScene:
         self.busy = False
         self.done = False
         self.msg = None
+        self.ranks = {}
+        self.goto = None
+        threading.Thread(target=self._load_ranks, daemon=True).start()
+
+    def _load_ranks(self):
+        for name, pid in self.flowers:
+            try:
+                self.ranks[pid] = ogs.rank_label(ogs.api(f"players/{pid}").get("ranking"))
+            except Exception:
+                pass
 
     def handle(self, ev):
         if ev.type != pygame.KEYDOWN:
@@ -290,9 +306,18 @@ class BotScene:
 
     def _challenge(self):
         try:
-            ogs.challenge_player(self.flowers[self.sel][1], "daily")
-            self.msg = "Sent. Any key: games"
-            self.done = True
+            name, pid = self.flowers[self.sel]
+            ogs.challenge_player(pid, "daily")
+            self.msg = "Starting..."
+            known = {g["id"] for g in ogs.my_games() if g["opp"] != name}
+            for _ in range(20):     # bot accepteert doorgaans binnen seconden
+                time.sleep(1)
+                for g in ogs.my_games():
+                    if g["opp"] == name and g["id"] not in known:
+                        self.goto = GameScene(g["id"])
+                        self.busy = False
+                        return
+            self.msg = "No response"
         except Exception:
             self.msg = "Failed"
         self.busy = False
@@ -306,6 +331,9 @@ class BotScene:
             if i == self.sel:
                 arrow(s, 84, y + 6)
             retro.text(s, name, 96, y + 6)
+            rk = self.ranks.get(self.flowers[i][1])
+            if rk:
+                retro.text(s, rk, 212, y + 6, PAL["text_dim"])
         if self.msg:
             retro.text_c(s, self.msg, W // 2, 218, PAL["text_dim"])
 
@@ -442,7 +470,6 @@ class GameScene:
         try:
             if action[0] == "move":
                 ogs.submit_move(self.gid, action[1], action[2])
-                play_stone()
                 self.nmoves += 1     # eigen zet: _load mag niet nogmaals plokken
             elif action[0] == "pass":
                 ogs.pass_move(self.gid)
@@ -484,8 +511,16 @@ class GameScene:
             self.cy = max(0, min(self.size - 1, self.cy + dy))
         elif ev.key in A_KEYS:
             if self.my_turn and self.phase == "play" and self.board[self.cy][self.cx] == 0:
-                self.confirm = ("move", self.cx, self.cy)
-                self.msg = self._coord(self.cx, self.cy) + "? A/B"
+                x, y = self.cx, self.cy
+                self.board[y][x] = self.my_color if self.gid else 1
+                play_stone()
+                if self.gid:
+                    self.busy = True
+                    self.msg = "Sending..."
+                    threading.Thread(target=self._do, args=(("move", x, y),),
+                                     daemon=True).start()
+                else:
+                    self.msg = "You: " + self._coord(x, y)
         elif ev.key == pygame.K_s:
             if self.gid and self.phase == "play":
                 self.menu = 0
@@ -498,17 +533,13 @@ class GameScene:
         return self
 
     def _handle_confirm(self, ev):
+        """Alleen pass/resign vragen bevestiging; zetten plaatsen direct."""
         if ev.key in A_KEYS:
             action = self.confirm
             self.confirm = None
-            if self.gid:
-                self.busy = True
-                self.msg = "Sending..."
-                threading.Thread(target=self._do, args=(action,), daemon=True).start()
-            elif action[0] == "move":
-                self.board[action[2]][action[1]] = 1
-                play_stone()
-                self.msg = "You: " + self._coord(action[1], action[2])
+            self.busy = True
+            self.msg = "Sending..."
+            threading.Thread(target=self._do, args=(action,), daemon=True).start()
         elif ev.key in B_KEYS:
             self.confirm = None
             self.msg = "Your move."
@@ -588,20 +619,25 @@ class GameScene:
             lx, ly = self.last
             col = PAL["white_sh"] if self.board[ly][lx] == 1 else PAL["black_hi"]
             pygame.draw.rect(s, col, (ox + lx * c - 2, oy + ly * c - 2, 5, 5))
-        if self.confirm and self.confirm[0] == "move":
-            _, cx, cy = self.confirm
-            retro.stone(s, ox + cx * c, oy + cy * c, r, "B" if self.my_color == 1 else "W")
-            d = r + 3
-            pygame.draw.rect(s, PAL["accent"],
-                             (ox + cx * c - d, oy + cy * c - d, 2 * d + 1, 2 * d + 1), 1)
-        elif self.menu is None and not self.info:
-            a = PAL["accent"]
+        if self.menu is None and not self.info:
             px, py = ox + self.cx * c, oy + self.cy * c
-            for sx in (-1, 1):
-                for sy in (-1, 1):
-                    x0, y0 = px + sx * 10, py + sy * 10
-                    pygame.draw.line(s, a, (x0, y0), (x0 - sx * 4, y0))
-                    pygame.draw.line(s, a, (x0, y0), (x0, y0 - sy * 4))
+            can_play = (self.my_turn and self.phase == "play" and not self.busy
+                        and self.board[self.cy][self.cx] == 0)
+            if can_play:
+                # ghost-steen: je ziet wat A gaat doen
+                ghost = pygame.Surface((r * 2 + 4, r * 2 + 4))
+                ghost.fill((255, 0, 255))
+                ghost.set_colorkey((255, 0, 255))
+                retro.stone(ghost, r + 2, r + 2, r, "B" if self.my_color == 1 else "W")
+                ghost.set_alpha(140)
+                s.blit(ghost, (px - r - 2, py - r - 2))
+            else:
+                a = PAL["accent"]
+                for sx in (-1, 1):
+                    for sy in (-1, 1):
+                        x0, y0 = px + sx * 10, py + sy * 10
+                        pygame.draw.line(s, a, (x0, y0), (x0 - sx * 4, y0))
+                        pygame.draw.line(s, a, (x0, y0), (x0, y0 - sy * 4))
         # plates: zwart boven, wit onder — Go-conventie, direct onder elkaar
         playing = self.phase == "play"
         self._plate(s, 14, 1, self.names[0], self.caps[0], playing and self.turn_color == 1)
@@ -679,6 +715,10 @@ def main():
                     return
                 ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_BACKSPACE)
             scene = scene.handle(ev)
+        nxt = getattr(scene, "goto", None)
+        if nxt is not None:
+            scene.goto = None
+            scene = nxt
         scene.draw(canvas)
         pygame.transform.scale(canvas, win.get_size(), win)
         pygame.display.flip()

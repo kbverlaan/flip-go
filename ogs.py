@@ -115,6 +115,14 @@ def me():
     return _me
 
 
+def rank_label(ranking):
+    """OGS ranking-veld -> '21k' / '2d'."""
+    if ranking is None:
+        return ""
+    r = float(ranking)
+    return f"{max(1, int(30 - r))}k" if r < 30 else f"{int(r - 29)}d"
+
+
 def speed_label(sp):
     return "daily" if sp == "correspondence" else (sp or "?")
 
