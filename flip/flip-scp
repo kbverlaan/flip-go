@@ -1,0 +1,11 @@
+#!/usr/bin/expect -f
+# scp naar de Knulli-Flip: flip-scp <lokaal...> <remote-pad>
+set timeout 300
+set args $argv
+spawn scp -r -O {*}$args
+expect {
+    "password:" { send "linux\r"; exp_continue }
+    eof
+}
+foreach {pid spawnid os_error_flag value} [wait] break
+exit $value
