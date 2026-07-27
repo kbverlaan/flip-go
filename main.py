@@ -92,6 +92,7 @@ class GamesScene:
         rows = [("game", g) for g in (self.games or [])]
         rows += [("seek", c) for c in self.seeking]
         rows.append(("new", None))
+        rows.append(("hist", None))
         return rows
 
     def handle(self, ev):
@@ -120,6 +121,8 @@ class GamesScene:
                 if self.error:
                     return GameScene(None)
                 return NewGameScene()
+            elif kind == "hist":
+                return HistoryScene()
         elif ev.key in (pygame.K_BACKSPACE, pygame.K_z):
             return TitleScene()
         elif ev.key == pygame.K_r:
@@ -162,9 +165,11 @@ class GamesScene:
                 else:
                     retro.text(s, "seeking", 36, y + 9, PAL["text_dim"])
                     retro.text(s, data["speed"], 240, y + 9, PAL["text_dim"])
-            else:
+            elif kind == "new":
                 label = "MOCK BOARD" if self.error else "NEW GAME"
                 retro.text(s, label, 36, y + 9)
+            else:
+                retro.text(s, "HISTORY", 36, y + 9)
         if self.error:
             retro.text_c(s, self.error, W // 2, 220, PAL["text_dim"])
         self.t += 1
@@ -175,6 +180,7 @@ class NewGameScene:
     OPTIONS = (("daily", "3d + 1d per move"),
                ("live", "2m + 30s per move"),
                ("bots", "the flower ladder"))
+    BACK = None      # na de klasse-definities gezet
 
     def __init__(self):
         self.sel = 0
@@ -184,10 +190,14 @@ class NewGameScene:
         self.msg = None
 
     def handle(self, ev):
-        if ev.type != pygame.KEYDOWN or self.busy:
+        if ev.type != pygame.KEYDOWN:
             return self
         if self.done:
             return GamesScene()
+        if ev.key in (pygame.K_BACKSPACE, pygame.K_z):
+            return self.BACK()
+        if self.busy:
+            return self
         if ev.key == pygame.K_DOWN:
             self.sel = min(len(self.OPTIONS) - 1, self.sel + 1)
         elif ev.key == pygame.K_UP:
@@ -198,8 +208,6 @@ class NewGameScene:
             self.busy = True
             self.msg = "Posting..."
             threading.Thread(target=self._create, daemon=True).start()
-        elif ev.key in (pygame.K_BACKSPACE, pygame.K_z):
-            return GamesScene()
         return self
 
     def _create(self):
@@ -230,6 +238,7 @@ class NewGameScene:
 
 class BotScene:
     """De bloemenladder: challenge een bot, die accepteert vanzelf."""
+    BACK = None
 
     def __init__(self):
         import ogs
@@ -241,10 +250,14 @@ class BotScene:
         self.msg = None
 
     def handle(self, ev):
-        if ev.type != pygame.KEYDOWN or self.busy:
+        if ev.type != pygame.KEYDOWN:
             return self
         if self.done:
             return GamesScene()
+        if ev.key in (pygame.K_BACKSPACE, pygame.K_z):
+            return self.BACK()
+        if self.busy:
+            return self
         if ev.key == pygame.K_DOWN:
             self.sel = min(len(self.flowers) - 1, self.sel + 1)
         elif ev.key == pygame.K_UP:
@@ -253,14 +266,12 @@ class BotScene:
             self.busy = True
             self.msg = "Challenging..."
             threading.Thread(target=self._challenge, daemon=True).start()
-        elif ev.key in (pygame.K_BACKSPACE, pygame.K_z):
-            return NewGameScene()
         return self
 
     def _challenge(self):
         try:
             import ogs
-            ogs.challenge_player(self.flowers[self.sel][1], "live")
+            ogs.challenge_player(self.flowers[self.sel][1], "daily")
             self.msg = "Sent. Any key: games"
             self.done = True
         except Exception:
@@ -281,13 +292,64 @@ class BotScene:
         self.t += 1
 
 
+class HistoryScene:
+    """Laatste afgeronde potten: uitslag + tegenstander. A = terugkijken."""
+
+    def __init__(self):
+        self.rows = None
+        self.sel = 0
+        self.t = 0
+        threading.Thread(target=self._load, daemon=True).start()
+
+    def _load(self):
+        try:
+            import ogs
+            self.rows = ogs.my_history()
+        except Exception:
+            self.rows = []
+
+    def handle(self, ev):
+        if ev.type != pygame.KEYDOWN:
+            return self
+        if ev.key in (pygame.K_BACKSPACE, pygame.K_z):
+            return GamesScene()
+        rows = self.rows or []
+        if ev.key == pygame.K_DOWN and rows:
+            self.sel = min(len(rows) - 1, self.sel + 1)
+        elif ev.key == pygame.K_UP and rows:
+            self.sel = max(0, self.sel - 1)
+        elif ev.key in (pygame.K_RETURN, pygame.K_x) and rows:
+            return GameScene(rows[self.sel]["id"], back=HistoryScene)
+        return self
+
+    def draw(self, s):
+        s.fill(PAL["screen"])
+        retro.text_c(s, "HISTORY", W // 2, 14, PAL["box"])
+        if self.rows is None:
+            retro.text_c(s, "loading" + "." * ((self.t // 20) % 4), W // 2, 110, PAL["text_dim"])
+        elif not self.rows:
+            retro.text_c(s, "No finished games.", W // 2, 110, PAL["text_dim"])
+        else:
+            for i, r in enumerate(self.rows[:6]):
+                y = 44 + i * 30
+                retro.dialog_box(s, (16, y, 288, 26))
+                if i == self.sel:
+                    arrow(s, 24, y + 9)
+                retro.text(s, "won " if r["won"] else "lost", 36, y + 9,
+                           PAL["green"] if r["won"] else PAL["accent"])
+                retro.text(s, f"vs {r['opp'][:15]}", 76, y + 9)
+                retro.text(s, r["result"], 240, y + 9, PAL["text_dim"])
+        self.t += 1
+
+
 class GameScene:
     """Echte OGS-pot (of mock als gid None). A = zet (met bevestiging),
     S = menu: Pass / Resign / Info / Quit."""
     MENU = ("PASS", "RESIGN", "INFO", "QUIT")
 
-    def __init__(self, gid):
+    def __init__(self, gid, back=None):
         self.gid = gid
+        self.back = back or GamesScene
         self.size = 9
         self.cx = self.cy = 4
         self.t = 0
@@ -399,7 +461,7 @@ class GameScene:
             return self._handle_menu(ev)
         if self.phase == "finished" and ev.key in (pygame.K_RETURN, pygame.K_x,
                                                    pygame.K_BACKSPACE, pygame.K_z):
-            return GamesScene() if self.gid else TitleScene()
+            return self.back() if self.gid else TitleScene()
         if self.phase == "stone removal":
             if ev.key in (pygame.K_RETURN, pygame.K_x):
                 self.busy = True
@@ -425,7 +487,7 @@ class GameScene:
                 self.msg = "..."
                 threading.Thread(target=self._load, daemon=True).start()
         elif ev.key in (pygame.K_BACKSPACE, pygame.K_z):
-            return GamesScene() if self.gid else TitleScene()
+            return self.back() if self.gid else TitleScene()
         return self
 
     def _handle_confirm(self, ev):
@@ -507,7 +569,9 @@ class GameScene:
         if self.confirm and self.confirm[0] == "move":
             _, cx, cy = self.confirm
             retro.stone(s, ox + cx * c, oy + cy * c, r, "B" if self.my_color == 1 else "W")
-            pygame.draw.circle(s, PAL["accent"], (ox + cx * c, oy + cy * c), r + 2, 1)
+            d = r + 3
+            pygame.draw.rect(s, PAL["accent"],
+                             (ox + cx * c - d, oy + cy * c - d, 2 * d + 1, 2 * d + 1), 1)
         elif self.menu is None and not self.info:
             a = PAL["accent"]
             px, py = ox + self.cx * c, oy + self.cy * c
@@ -553,6 +617,10 @@ class GameScene:
                 (self.phase == "stone removal" or (playing and not self.my_turn))):
             threading.Thread(target=self._load, daemon=True).start()
         self.t += 1
+
+
+NewGameScene.BACK = GamesScene
+BotScene.BACK = NewGameScene
 
 
 def main():
