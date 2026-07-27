@@ -123,6 +123,15 @@ def rank_label(ranking):
     return f"{max(1, int(30 - r))}k" if r < 30 else f"{int(r - 29)}d"
 
 
+def rating_to_rank(rating):
+    """Echte rating -> kyu/dan, zonder de 25k-weergaveklem van OGS."""
+    import math
+    if not rating:
+        return ""
+    r = math.log(rating / 525) * 23.15
+    return f"{round(30 - r)}k" if r < 30 else f"{round(r - 29)}d"
+
+
 def speed_label(sp):
     return "daily" if sp == "correspondence" else (sp or "?")
 
