@@ -105,6 +105,7 @@ class GamesScene:
         self.cancelq = None      # challenge-id in bevestiging
         self.stopping = None     # challenge-id die geannuleerd wordt
         self.me_label = None
+        self.fsel = 0            # footer: 0 = NEW GAME, 1 = HISTORY
         threading.Thread(target=self._load, daemon=True).start()
 
     def _load(self):
@@ -117,12 +118,12 @@ class GamesScene:
             self.error = "Offline - mock game"
             self.games = []
 
+    FOOTER = ("NEW GAME", "HISTORY")
+
     def _rows(self):
-        """-> lijst ('game'|'seek'|'new', data)"""
+        """-> lijst ('game'|'seek', data); footer staat er los onder"""
         rows = [("game", g) for g in (self.games or [])]
         rows += [("seek", c) for c in self.seeking]
-        rows.append(("new", None))
-        rows.append(("hist", None))
         return rows
 
     def handle(self, ev):
@@ -138,21 +139,21 @@ class GamesScene:
             return self
         rows = self._rows()
         if ev.key == pygame.K_DOWN:
-            self.sel = min(len(rows) - 1, self.sel + 1)
+            self.sel = min(len(rows), self.sel + 1)
         elif ev.key == pygame.K_UP:
             self.sel = max(0, self.sel - 1)
+        elif ev.key in (pygame.K_LEFT, pygame.K_RIGHT) and self.sel == len(rows):
+            self.fsel = 1 - self.fsel
         elif ev.key in A_KEYS:
+            if self.sel == len(rows):
+                if self.fsel == 1:
+                    return HistoryScene()
+                return GameScene(None) if self.error else NewGameScene()
             kind, data = rows[self.sel]
             if kind == "game":
                 return GameScene(data["id"])
             if kind == "seek":
                 self.cancelq = data["id"]
-            elif kind == "new":
-                if self.error:
-                    return GameScene(None)
-                return NewGameScene()
-            elif kind == "hist":
-                return HistoryScene()
         elif ev.key in B_KEYS:
             return TitleScene()
         elif ev.key == pygame.K_r:
@@ -176,7 +177,7 @@ class GamesScene:
             self.t += 1
             return
         rows = self._rows()
-        for i, (kind, data) in enumerate(rows[:6]):
+        for i, (kind, data) in enumerate(rows[:5]):
             y = 44 + i * 30
             retro.dialog_box(s, (16, y, 288, 26))
             if i == self.sel:
@@ -194,11 +195,14 @@ class GamesScene:
                 else:
                     retro.text(s, "seeking", 36, y + 9, PAL["text_dim"])
                     retro.text(s, data["speed"], 240, y + 9, PAL["text_dim"])
-            elif kind == "new":
-                label = "MOCK BOARD" if self.error else "NEW GAME"
-                retro.text(s, label, 36, y + 9)
-            else:
-                retro.text(s, "HISTORY", 36, y + 9)
+        # footer: twee boxen naast elkaar, gameboy-stijl
+        on_footer = self.sel == len(rows)
+        left_label = "MOCK BOARD" if self.error else "NEW GAME"
+        for f, (bx, label) in enumerate(((16, left_label), (164, "HISTORY"))):
+            retro.dialog_box(s, (bx, 192, 140, 26))
+            if on_footer and self.fsel == f:
+                arrow(s, bx + 10, 192 + 9)
+            retro.text_c(s, label, bx + 76, 192 + 9)
         if self.error:
             retro.text_c(s, self.error, W // 2, 220, PAL["text_dim"])
         elif self.me_label:
@@ -281,7 +285,9 @@ class BotScene:
     def _load_ranks(self):
         for name, pid in self.flowers:
             try:
-                self.ranks[pid] = ogs.rank_label(ogs.api(f"players/{pid}").get("ranking"))
+                d = ogs.api(f"players/{pid}")
+                rating = (d.get("ratings") or {}).get("overall", {}).get("rating")
+                self.ranks[pid] = ogs.rating_to_rank(rating)
             except Exception:
                 pass
 
