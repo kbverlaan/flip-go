@@ -443,8 +443,10 @@ class GameScene:
             if action[0] == "move":
                 ogs.submit_move(self.gid, action[1], action[2])
                 play_stone()
+                self.nmoves += 1     # eigen zet: _load mag niet nogmaals plokken
             elif action[0] == "pass":
                 ogs.pass_move(self.gid)
+                self.nmoves += 1
             elif action[0] == "resign":
                 ogs.resign(self.gid)
             elif action[0] == "accept":
@@ -561,7 +563,7 @@ class GameScene:
                 pygame.draw.line(bg, PAL["line"], (o + i * c, o), (o + i * c, o + span))
             if n == 9:
                 for hx, hy in ((2, 2), (6, 2), (4, 4), (2, 6), (6, 6)):
-                    pygame.draw.circle(bg, PAL["line"], (o + hx * c, o + hy * c), 2)
+                    pygame.draw.rect(bg, PAL["line"], (o + hx * c - 1, o + hy * c - 1, 3, 3))
             self._bg, self._bg_size = bg, n
         return self._bg
 
@@ -585,7 +587,7 @@ class GameScene:
         if self.last:
             lx, ly = self.last
             col = PAL["white_sh"] if self.board[ly][lx] == 1 else PAL["black_hi"]
-            pygame.draw.rect(s, col, (ox + lx * c - 2, oy + ly * c - 2, 4, 4))
+            pygame.draw.rect(s, col, (ox + lx * c - 2, oy + ly * c - 2, 5, 5))
         if self.confirm and self.confirm[0] == "move":
             _, cx, cy = self.confirm
             retro.stone(s, ox + cx * c, oy + cy * c, r, "B" if self.my_color == 1 else "W")
