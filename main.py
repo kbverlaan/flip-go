@@ -707,7 +707,7 @@ class GameScene:
             can_play = (self.my_turn and self.phase == "play" and not self.busy
                         and self.board[self.cy][self.cx] == 0)
             if can_play:
-                retro.ghost(s, px, py, r, "B" if self.my_color == 1 else "W")
+                retro.stone(s, px, py, r, "B" if self.my_color == 1 else "W")
             else:
                 a = PAL["accent"]
                 for sx in (-1, 1):

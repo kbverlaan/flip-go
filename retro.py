@@ -51,27 +51,6 @@ def dialog_box(surf, rect):
     for cx, cy in ((x, y), (x + w - 1, y), (x, y + h - 1), (x + w - 1, y + h - 1)):
         surf.set_at((cx, cy), PAL["screen"])
 
-_ghosts = {}
-
-
-def ghost(surf, px, py, r, color):
-    """Geditherde steen: 50%-schaakbord zodat een niet-gezette zet
-    onmiskenbaar anders is dan een echte steen."""
-    key = (r, color)
-    if key not in _ghosts:
-        mag = (255, 0, 255)
-        g = pygame.Surface((r * 2 + 2, r * 2 + 2))
-        g.fill(mag)
-        g.set_colorkey(mag)
-        stone(g, r + 1, r + 1, r, color)
-        for y in range(g.get_height()):
-            for x in range(g.get_width()):
-                if (x + y) % 2:
-                    g.set_at((x, y), mag)
-        _ghosts[key] = g
-    surf.blit(_ghosts[key], (px - r - 1, py - r - 1))
-
-
 def text_r(surf, s, right_x, y, color=None, size=8):
     img = font(size).render(s, False, color or PAL["text"])
     surf.blit(img, (right_x - img.get_width(), y))
