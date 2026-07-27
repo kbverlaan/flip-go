@@ -74,6 +74,8 @@ class GamesScene:
         self.error = None
         self.sel = 0
         self.t = 0
+        self.cancelq = None      # challenge-id in bevestiging
+        self.stopping = None     # challenge-id die geannuleerd wordt
         threading.Thread(target=self._load, daemon=True).start()
 
     def _load(self):
@@ -93,7 +95,15 @@ class GamesScene:
         return rows
 
     def handle(self, ev):
-        if ev.type != pygame.KEYDOWN:
+        if ev.type != pygame.KEYDOWN or self.stopping:
+            return self
+        if self.cancelq:
+            if ev.key in (pygame.K_RETURN, pygame.K_x):
+                self.stopping = self.cancelq
+                self.cancelq = None
+                threading.Thread(target=self._cancel, args=(self.stopping,), daemon=True).start()
+            elif ev.key in (pygame.K_BACKSPACE, pygame.K_z):
+                self.cancelq = None
             return self
         rows = self._rows()
         if ev.key == pygame.K_DOWN:
@@ -105,7 +115,7 @@ class GamesScene:
             if kind == "game":
                 return GameScene(data["id"])
             if kind == "seek":
-                threading.Thread(target=self._cancel, args=(data["id"],), daemon=True).start()
+                self.cancelq = data["id"]
             elif kind == "new":
                 if self.error:
                     return GameScene(None)
@@ -123,6 +133,8 @@ class GamesScene:
         except Exception:
             pass
         self._load()
+        self.stopping = None
+        self.sel = 0
 
     def draw(self, s):
         s.fill(PAL["screen"])
@@ -138,13 +150,18 @@ class GamesScene:
             if i == self.sel and (self.t // 20) % 2 == 0:
                 arrow(s, 24, y + 9)
             if kind == "game":
-                retro.text(s, f"vs {data['opp'][:10]}", 36, y + 9)
-                retro.text(s, data["speed"], 232, y + 9, PAL["text_dim"])
+                retro.text(s, f"vs {data['opp'][:19]}", 36, y + 9)
+                retro.text(s, data["speed"], 240, y + 9, PAL["text_dim"])
                 if data["my_turn"]:
                     retro.text(s, "*", 288, y + 9, PAL["accent"])
             elif kind == "seek":
-                retro.text(s, f"seeking {data['speed']}", 36, y + 9, PAL["text_dim"])
-                retro.text(s, "A:stop", 240, y + 9, PAL["text_dim"])
+                if self.stopping == data["id"]:
+                    retro.text(s, "stopping...", 36, y + 9, PAL["text_dim"])
+                elif self.cancelq == data["id"]:
+                    retro.text(s, "stop seeking? A/B", 36, y + 9, PAL["accent"])
+                else:
+                    retro.text(s, "seeking", 36, y + 9, PAL["text_dim"])
+                    retro.text(s, data["speed"], 240, y + 9, PAL["text_dim"])
             else:
                 label = "MOCK BOARD" if self.error else "NEW GAME"
                 retro.text(s, label, 36, y + 9)
