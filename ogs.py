@@ -169,6 +169,16 @@ def pass_move(gid):
     return submit_move(gid, -1, -1)
 
 
+def accept_removal(gid):
+    """Accepteer de telling (server-voorstel voor dode stenen)."""
+    g = api(f"games/{gid}")
+    removed = (g.get("gamedata") or {}).get("removed") or ""
+    return _game_command(gid, "game/removed_stones/accept",
+                         {"game_id": gid, "player_id": me().get("id"),
+                          "stones": removed, "strict_seki_mode": False},
+                         f"game/{gid}/removed_stones_accepted")
+
+
 def resign(gid):
     return _game_command(gid, "game/resign", {"game_id": gid}, f"game/{gid}/phase")
 

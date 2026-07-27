@@ -300,8 +300,12 @@ class GameScene:
         self.speed = ""
         self.my_color = 1
         self.my_turn = False
+        self.turn_color = 1
         self.phase = "play"
         self.outcome = ""
+        self.winner_id = None
+        self.me_id = None
+        self.black_id = None
         self.nmoves = 0
         self.confirm = None      # ("move",x,y) | ("pass",) | ("resign",)
         self.menu = None         # None | cursor-index
@@ -334,6 +338,8 @@ class GameScene:
             self.speed = "daily" if sp == "correspondence" else sp
             self.phase = gd.get("phase", "play")
             self.outcome = gd.get("outcome", "")
+            self.winner_id = gd.get("winner")
+            self.black_id = pl.get("black", {}).get("id")
             moves = gd.get("moves", [])
             board, cb, cw, last = goban.from_moves(self.size, moves, gd.get("handicap", 0))
             if len(moves) > self.nmoves and self.nmoves:
@@ -341,12 +347,15 @@ class GameScene:
             self.nmoves = len(moves)
             self.board, self.caps, self.last = board, (cb, cw), last
             m = ogs.me()
-            self.my_color = 1 if pl.get("black", {}).get("id") == m.get("id") else 2
-            self.my_turn = gd.get("clock", {}).get("current_player") == m.get("id")
+            self.me_id = m.get("id")
+            self.my_color = 1 if self.black_id == self.me_id else 2
+            cur = gd.get("clock", {}).get("current_player")
+            self.my_turn = cur == self.me_id
+            self.turn_color = 1 if cur == self.black_id else 2
             if self.phase == "finished":
-                self.msg = self.outcome[:10] or "finished"
-            elif self.phase != "play":
-                self.msg = self.phase[:10]
+                self.msg = "The end."
+            elif self.phase == "stone removal":
+                self.msg = "Counting"
             else:
                 self.msg = "Your move." if self.my_turn else "Waiting..."
         except Exception:
@@ -362,10 +371,20 @@ class GameScene:
                 ogs.pass_move(self.gid)
             elif action[0] == "resign":
                 ogs.resign(self.gid)
+            elif action[0] == "accept":
+                ogs.accept_removal(self.gid)
             self._load()
         except Exception:
             self.msg = f"{action[0]} failed"[:10]
         self.busy = False
+
+    def _outcome_str(self):
+        if not self.outcome:
+            return "finished"
+        wc = "B" if self.winner_id == self.black_id else "W"
+        if self.outcome.endswith("points"):
+            return f"{wc}+{self.outcome.split()[0]}"
+        return f"{wc}+{self.outcome[0]}"     # Resignation -> R, Timeout -> T
 
     # ---------- input ----------
     def handle(self, ev):
@@ -378,6 +397,17 @@ class GameScene:
             return self._handle_confirm(ev)
         if self.menu is not None:
             return self._handle_menu(ev)
+        if self.phase == "finished" and ev.key in (pygame.K_RETURN, pygame.K_x,
+                                                   pygame.K_BACKSPACE, pygame.K_z):
+            return GamesScene() if self.gid else TitleScene()
+        if self.phase == "stone removal":
+            if ev.key in (pygame.K_RETURN, pygame.K_x):
+                self.busy = True
+                self.msg = "Sending..."
+                threading.Thread(target=self._do, args=(("accept",),), daemon=True).start()
+            elif ev.key in (pygame.K_BACKSPACE, pygame.K_z):
+                return GamesScene()
+            return self
         dx = (ev.key == pygame.K_RIGHT) - (ev.key == pygame.K_LEFT)
         dy = (ev.key == pygame.K_DOWN) - (ev.key == pygame.K_UP)
         if dx or dy:
@@ -444,10 +474,10 @@ class GameScene:
     def _plate(self, s, y, color, name, caps, to_move):
         retro.dialog_box(s, (224, y, 92, 34))
         if to_move and self.phase == "play":
-            arrow(s, 228, y + 7, PAL["accent"])
-        retro.stone(s, 240, y + 11, 4, "B" if color == 1 else "W")
-        retro.text(s, name[:8], 248, y + 7)
-        retro.text(s, f"caps {caps}", 240, y + 20, PAL["text_dim"])
+            arrow(s, 227, y + 7, PAL["accent"])
+        retro.stone(s, 238, y + 11, 4, "B" if color == 1 else "W")
+        retro.text(s, name[:9], 244, y + 7)
+        retro.text(s, f"caps {caps}", 238, y + 20, PAL["text_dim"])
 
     def draw(self, s):
         s.fill(PAL["screen"])
@@ -486,21 +516,17 @@ class GameScene:
                     x0, y0 = px + sx * 10, py + sy * 10
                     pygame.draw.line(s, a, (x0, y0), (x0 - sx * 4, y0))
                     pygame.draw.line(s, a, (x0, y0), (x0, y0 - sy * 4))
-        # Pokemon-plates: tegenstander boven, jij onder
-        opp = 2 if self.my_color == 1 else 1
-        me_i, opp_i = self.my_color - 1, opp - 1
-        names = self.names
-        caps = self.caps
-        opp_turn = not self.my_turn
-        self._plate(s, 14, opp, names[opp_i], caps[opp_i], opp_turn)
-        self._plate(s, 156, self.my_color, names[me_i], caps[me_i], self.my_turn)
+        # plates: zwart boven, wit onder — Go-conventie, direct onder elkaar
+        playing = self.phase == "play"
+        self._plate(s, 14, 1, self.names[0], self.caps[0], playing and self.turn_color == 1)
+        self._plate(s, 52, 2, self.names[1], self.caps[1], playing and self.turn_color == 2)
         retro.dialog_box(s, (224, 198, 92, 28))
         retro.text(s, self.msg[:10], 230, 208)
-        # menu-overlay (Pokemon-pauzemenu)
+        # menu tussen plates en berichtvak (Pokemon-pauzemenu)
         if self.menu is not None:
-            retro.dialog_box(s, (224, 56, 92, 92))
+            retro.dialog_box(s, (224, 96, 92, 92))
             for i, item in enumerate(self.MENU):
-                y = 64 + i * 20
+                y = 104 + i * 20
                 if i == self.menu:
                     arrow(s, 230, y)
                 retro.text(s, item, 240, y)
@@ -510,8 +536,21 @@ class GameScene:
             retro.text(s, f"komi {self.komi:g}", 52, 108)
             retro.text(s, f"move {self.nmoves}", 52, 124)
             retro.text(s, "B: close", 52, 140, PAL["text_dim"])
+        if self.phase == "finished" and self.gid:
+            won = self.winner_id == self.me_id
+            retro.dialog_box(s, (40, 84, 240, 68))
+            retro.text_c(s, "YOU WON" if won else "YOU LOST", 160, 98,
+                         PAL["green"] if won else PAL["accent"])
+            retro.text_c(s, self._outcome_str(), 160, 116)
+            retro.text_c(s, "A: back to games", 160, 134, PAL["text_dim"])
+        elif self.phase == "stone removal" and not self.busy:
+            retro.dialog_box(s, (40, 84, 240, 68))
+            retro.text_c(s, "COUNTING", 160, 98)
+            retro.text_c(s, "A: accept result", 160, 116)
+            retro.text_c(s, "B: back to games", 160, 134, PAL["text_dim"])
         poll = 180 if self.speed in ("live", "blitz") else 1800
-        if self.gid and not self.my_turn and self.phase == "play" and self.t and self.t % poll == 0:
+        if (self.gid and self.t and self.t % poll == 0 and
+                (self.phase == "stone removal" or (playing and not self.my_turn))):
             threading.Thread(target=self._load, daemon=True).start()
         self.t += 1
 
