@@ -57,14 +57,14 @@ def text_r(surf, s, right_x, y, color=None, size=8):
 
 
 def fmt_time(sec):
-    """Seconden -> '2d4h' / '3h05m' / '4:32'."""
+    """Seconden -> '2d' / '23h' / '4:32' — grover naarmate er meer tijd is."""
     if sec is None:
         return ""
     sec = max(0, int(sec))
     if sec >= 86400:
-        return f"{sec // 86400}d{(sec % 86400) // 3600}h"
+        return f"{sec // 86400}d"
     if sec >= 3600:
-        return f"{sec // 3600}h{(sec % 3600) // 60:02d}m"
+        return f"{sec // 3600}h"
     return f"{sec // 60}:{sec % 60:02d}"
 
 
