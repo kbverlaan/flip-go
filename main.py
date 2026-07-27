@@ -142,6 +142,7 @@ class GamesScene:
     def draw(self, s):
         s.fill(PAL["screen"])
         retro.text_c(s, "YOUR GAMES", W // 2, 14, PAL["box"])
+        retro.text(s, "B back", 264, 14, PAL["text_dim"])
         if self.games is None:
             retro.text_c(s, "loading" + "." * ((self.t // 20) % 4), W // 2, 110, PAL["text_dim"])
             self.t += 1
@@ -223,6 +224,7 @@ class NewGameScene:
     def draw(self, s):
         s.fill(PAL["screen"])
         retro.text_c(s, "NEW GAME", W // 2, 14, PAL["box"])
+        retro.text(s, "B back", 264, 14, PAL["text_dim"])
         retro.text_c(s, "9x9 - ranked - japanese", W // 2, 34, PAL["text_dim"])
         for i, (name, desc) in enumerate(self.OPTIONS):
             y = 60 + i * 44
@@ -281,6 +283,7 @@ class BotScene:
     def draw(self, s):
         s.fill(PAL["screen"])
         retro.text_c(s, "FLOWER LADDER", W // 2, 14, PAL["box"])
+        retro.text(s, "B back", 264, 14, PAL["text_dim"])
         for i, (name, _) in enumerate(self.flowers):
             y = 40 + i * 24
             retro.dialog_box(s, (76, y, 168, 20))
@@ -325,6 +328,7 @@ class HistoryScene:
     def draw(self, s):
         s.fill(PAL["screen"])
         retro.text_c(s, "HISTORY", W // 2, 14, PAL["box"])
+        retro.text(s, "B back", 264, 14, PAL["text_dim"])
         if self.rows is None:
             retro.text_c(s, "loading" + "." * ((self.t // 20) % 4), W // 2, 110, PAL["text_dim"])
         elif not self.rows:
@@ -652,7 +656,9 @@ def main():
             if ev.type == pygame.QUIT:
                 return
             if ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
-                return
+                if isinstance(scene, TitleScene):
+                    return
+                ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_BACKSPACE)
             scene = scene.handle(ev)
         canvas.fill((0, 0, 0))
         scene.draw(canvas)
