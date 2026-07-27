@@ -5,6 +5,7 @@ Screenshots:    python main.py --shot   (headless, schrijft out/*.png)
 
 Besturing (Mac-test = Flip-mapping):
   pijltjes = D-pad   Enter/X = A   Backspace/Z = B   S = Start   R = refresh
+In een pot: S opent het menu (Pass / Resign / Info / Quit).
 """
 import os
 import sys
@@ -12,12 +13,31 @@ import threading
 
 if "--shot" in sys.argv:
     os.environ["SDL_VIDEODRIVER"] = "dummy"
+    os.environ["SDL_AUDIODRIVER"] = "dummy"
 
 import pygame
 import retro
 from retro import PAL, W, H
 
 SCALE = 2  # 640x480 venster; op de Flip fullscreen 2x
+
+_stone_snd = None
+
+
+def play_stone():
+    global _stone_snd
+    try:
+        if _stone_snd is None:
+            _stone_snd = pygame.mixer.Sound(str(retro.ASSETS / "stone.wav"))
+        _stone_snd.play()
+    except Exception:
+        pass
+
+
+def arrow(s, x, y, color=None):
+    """Pokemon-cursor: klein driehoekje."""
+    c = color or PAL["text"]
+    pygame.draw.polygon(s, c, [(x, y), (x, y + 8), (x + 5, y + 4)])
 
 
 class TitleScene:
@@ -46,10 +66,11 @@ class TitleScene:
 
 
 class GamesScene:
-    """Je actieve OGS-potten. Enter = openen."""
+    """Je potten + open challenges + NEW GAME."""
 
     def __init__(self):
-        self.games = None      # None = laden, [] = geen, lijst = klaar
+        self.games = None
+        self.seeking = []
         self.error = None
         self.sel = 0
         self.t = 0
@@ -59,51 +80,137 @@ class GamesScene:
         try:
             import ogs
             self.games = ogs.my_games()
-        except Exception as e:
+            self.seeking = ogs.my_challenges()
+        except Exception:
             self.error = "Offline - mock game"
             self.games = []
+
+    def _rows(self):
+        """-> lijst ('game'|'seek'|'new', data)"""
+        rows = [("game", g) for g in (self.games or [])]
+        rows += [("seek", c) for c in self.seeking]
+        rows.append(("new", None))
+        return rows
 
     def handle(self, ev):
         if ev.type != pygame.KEYDOWN:
             return self
-        gs = self.games or []
-        if ev.key == pygame.K_DOWN and gs:
-            self.sel = min(len(gs) - 1, self.sel + 1)
-        elif ev.key == pygame.K_UP and gs:
+        rows = self._rows()
+        if ev.key == pygame.K_DOWN:
+            self.sel = min(len(rows) - 1, self.sel + 1)
+        elif ev.key == pygame.K_UP:
             self.sel = max(0, self.sel - 1)
         elif ev.key in (pygame.K_RETURN, pygame.K_x):
-            if gs:
-                return GameScene(gs[self.sel]["id"])
-            if self.error:
-                return GameScene(None)     # offline: mock
+            kind, data = rows[self.sel]
+            if kind == "game":
+                return GameScene(data["id"])
+            if kind == "seek":
+                threading.Thread(target=self._cancel, args=(data["id"],), daemon=True).start()
+            elif kind == "new":
+                if self.error:
+                    return GameScene(None)
+                return NewGameScene()
         elif ev.key in (pygame.K_BACKSPACE, pygame.K_z):
             return TitleScene()
         elif ev.key == pygame.K_r:
             return GamesScene()
         return self
 
+    def _cancel(self, cid):
+        try:
+            import ogs
+            ogs.cancel_challenge(cid)
+        except Exception:
+            pass
+        self._load()
+
     def draw(self, s):
         s.fill(PAL["screen"])
         retro.text_c(s, "YOUR GAMES", W // 2, 14, PAL["box"])
         if self.games is None:
             retro.text_c(s, "loading" + "." * ((self.t // 20) % 4), W // 2, 110, PAL["text_dim"])
-        elif not self.games:
-            retro.text_c(s, self.error or "No active games.", W // 2, 100, PAL["text_dim"])
-            retro.text_c(s, "A: mock board  B: back", W // 2, 120, PAL["text_dim"])
-        else:
-            for i, g in enumerate(self.games[:6]):
-                y = 44 + i * 30
-                retro.dialog_box(s, (16, y, 288, 26))
-                mark = ">" if i == self.sel and (self.t // 20) % 2 == 0 else " "
-                retro.text(s, f"{mark}{g['black'][:8]} v {g['white'][:8]}", 24, y + 9)
-                if g["my_turn"]:
+            self.t += 1
+            return
+        rows = self._rows()
+        for i, (kind, data) in enumerate(rows[:6]):
+            y = 44 + i * 30
+            retro.dialog_box(s, (16, y, 288, 26))
+            if i == self.sel and (self.t // 20) % 2 == 0:
+                arrow(s, 24, y + 9)
+            if kind == "game":
+                retro.text(s, f"vs {data['opp'][:10]}", 36, y + 9)
+                retro.text(s, data["speed"], 232, y + 9, PAL["text_dim"])
+                if data["my_turn"]:
                     retro.text(s, "*", 288, y + 9, PAL["accent"])
+            elif kind == "seek":
+                retro.text(s, f"seeking {data['speed']}", 36, y + 9, PAL["text_dim"])
+                retro.text(s, "A:stop", 240, y + 9, PAL["text_dim"])
+            else:
+                label = "MOCK BOARD" if self.error else "NEW GAME"
+                retro.text(s, label, 36, y + 9)
+        if self.error:
+            retro.text_c(s, self.error, W // 2, 220, PAL["text_dim"])
+        self.t += 1
+
+
+class NewGameScene:
+    """Nieuwe pot: daily of live. Open challenge, 9x9 ranked."""
+    OPTIONS = (("daily", "3d + 1d per move"), ("live", "2m + 30s per move"))
+
+    def __init__(self):
+        self.sel = 0
+        self.t = 0
+        self.busy = False
+        self.msg = None
+
+    def handle(self, ev):
+        if ev.type != pygame.KEYDOWN or self.busy:
+            return self
+        if ev.key == pygame.K_DOWN:
+            self.sel = min(1, self.sel + 1)
+        elif ev.key == pygame.K_UP:
+            self.sel = max(0, self.sel - 1)
+        elif ev.key in (pygame.K_RETURN, pygame.K_x):
+            self.busy = True
+            self.msg = "Posting..."
+            threading.Thread(target=self._create, daemon=True).start()
+        elif ev.key in (pygame.K_BACKSPACE, pygame.K_z):
+            return GamesScene()
+        return self
+
+    def _create(self):
+        try:
+            import ogs
+            ogs.create_challenge(self.OPTIONS[self.sel][0])
+            self.msg = "ok"
+        except Exception:
+            self.msg = "Failed"
+            self.busy = False
+
+    def draw(self, s):
+        s.fill(PAL["screen"])
+        retro.text_c(s, "NEW GAME", W // 2, 14, PAL["box"])
+        retro.text_c(s, "9x9 - ranked - japanese", W // 2, 34, PAL["text_dim"])
+        for i, (name, desc) in enumerate(self.OPTIONS):
+            y = 70 + i * 44
+            retro.dialog_box(s, (60, y, 200, 38))
+            if i == self.sel and (self.t // 20) % 2 == 0:
+                arrow(s, 68, y + 8)
+            retro.text(s, name.upper(), 80, y + 7)
+            retro.text(s, desc, 80, y + 21, PAL["text_dim"])
+        if self.msg == "ok":
+            retro.text_c(s, "Challenge posted.", W // 2, 180)
+            retro.text_c(s, "B: back to games", W // 2, 196, PAL["text_dim"])
+            self.busy = False
+        elif self.msg:
+            retro.text_c(s, self.msg, W // 2, 188, PAL["text_dim"])
         self.t += 1
 
 
 class GameScene:
-    """Echte OGS-pot (of mock als gid None). A op leeg punt -> bevestig -> zet."""
-    CELL = 23
+    """Echte OGS-pot (of mock als gid None). A = zet (met bevestiging),
+    S = menu: Pass / Resign / Info / Quit."""
+    MENU = ("PASS", "RESIGN", "INFO", "QUIT")
 
     def __init__(self, gid):
         self.gid = gid
@@ -115,10 +222,16 @@ class GameScene:
         self.last = None
         self.names = ("black", "white")
         self.komi = 6.5
+        self.rules = "japanese"
+        self.speed = ""
         self.my_color = 1
         self.my_turn = False
         self.phase = "play"
-        self.confirm = None      # (x, y) wacht op A/B
+        self.outcome = ""
+        self.nmoves = 0
+        self.confirm = None      # ("move",x,y) | ("pass",) | ("resign",)
+        self.menu = None         # None | cursor-index
+        self.info = False
         self.busy = False
         self.msg = "Loading..."
         if gid:
@@ -130,6 +243,7 @@ class GameScene:
             self.my_turn = True
             self.msg = "Mock board"
 
+    # ---------- data ----------
     def _load(self):
         try:
             import ogs
@@ -141,66 +255,125 @@ class GameScene:
             self.names = (pl.get("black", {}).get("username", "?"),
                           pl.get("white", {}).get("username", "?"))
             self.komi = float(gd.get("komi", 6.5))
+            self.rules = gd.get("rules", "japanese")
+            sp = gd.get("time_control", {}).get("speed", "")
+            self.speed = "daily" if sp == "correspondence" else sp
             self.phase = gd.get("phase", "play")
-            board, cb, cw, last = goban.from_moves(
-                self.size, gd.get("moves", []), gd.get("handicap", 0))
+            self.outcome = gd.get("outcome", "")
+            moves = gd.get("moves", [])
+            board, cb, cw, last = goban.from_moves(self.size, moves, gd.get("handicap", 0))
+            if len(moves) > self.nmoves and self.nmoves:
+                play_stone()          # nieuwe zet binnengekomen
+            self.nmoves = len(moves)
             self.board, self.caps, self.last = board, (cb, cw), last
             m = ogs.me()
             self.my_color = 1 if pl.get("black", {}).get("id") == m.get("id") else 2
             self.my_turn = gd.get("clock", {}).get("current_player") == m.get("id")
-            if self.phase != "play":
-                self.msg = self.phase
+            if self.phase == "finished":
+                self.msg = self.outcome[:10] or "finished"
+            elif self.phase != "play":
+                self.msg = self.phase[:10]
             else:
                 self.msg = "Your move." if self.my_turn else "Waiting..."
         except Exception:
             self.msg = "Load failed"
 
-    def _submit(self, x, y):
+    def _do(self, action):
         try:
             import ogs
-            ogs.submit_move(self.gid, x, y, self.size)
+            if action[0] == "move":
+                ogs.submit_move(self.gid, action[1], action[2], self.size)
+                play_stone()
+            elif action[0] == "pass":
+                ogs.pass_move(self.gid)
+            elif action[0] == "resign":
+                ogs.resign(self.gid)
             self._load()
         except Exception:
-            self.msg = "Move failed"
+            self.msg = f"{action[0]} failed"[:10]
         self.busy = False
 
+    # ---------- input ----------
     def handle(self, ev):
         if ev.type != pygame.KEYDOWN or self.busy:
             return self
-        if self.confirm:
-            if ev.key in (pygame.K_RETURN, pygame.K_x):
-                x, y = self.confirm
-                self.confirm = None
-                if self.gid:
-                    self.busy = True
-                    self.msg = "Sending..."
-                    threading.Thread(target=self._submit, args=(x, y), daemon=True).start()
-                else:
-                    self.board[y][x] = 1
-                    self.msg = "You: " + self._coord(x, y)
-            elif ev.key in (pygame.K_BACKSPACE, pygame.K_z):
-                self.confirm = None
-                self.msg = "Your move."
+        if self.info:
+            self.info = False
             return self
+        if self.confirm:
+            return self._handle_confirm(ev)
+        if self.menu is not None:
+            return self._handle_menu(ev)
         dx = (ev.key == pygame.K_RIGHT) - (ev.key == pygame.K_LEFT)
         dy = (ev.key == pygame.K_DOWN) - (ev.key == pygame.K_UP)
         if dx or dy:
             self.cx = max(0, min(self.size - 1, self.cx + dx))
             self.cy = max(0, min(self.size - 1, self.cy + dy))
         elif ev.key in (pygame.K_RETURN, pygame.K_x):
-            if self.my_turn and self.board[self.cy][self.cx] == 0:
-                self.confirm = (self.cx, self.cy)
+            if self.my_turn and self.phase == "play" and self.board[self.cy][self.cx] == 0:
+                self.confirm = ("move", self.cx, self.cy)
                 self.msg = self._coord(self.cx, self.cy) + "? A/B"
+        elif ev.key == pygame.K_s:
+            if self.gid and self.phase == "play":
+                self.menu = 0
         elif ev.key == pygame.K_r:
             if self.gid:
-                self.msg = "Refreshing..."
+                self.msg = "..."
                 threading.Thread(target=self._load, daemon=True).start()
         elif ev.key in (pygame.K_BACKSPACE, pygame.K_z):
             return GamesScene() if self.gid else TitleScene()
         return self
 
+    def _handle_confirm(self, ev):
+        if ev.key in (pygame.K_RETURN, pygame.K_x):
+            action = self.confirm
+            self.confirm = None
+            if self.gid:
+                self.busy = True
+                self.msg = "Sending..."
+                threading.Thread(target=self._do, args=(action,), daemon=True).start()
+            elif action[0] == "move":
+                self.board[action[2]][action[1]] = 1
+                play_stone()
+                self.msg = "You: " + self._coord(action[1], action[2])
+        elif ev.key in (pygame.K_BACKSPACE, pygame.K_z):
+            self.confirm = None
+            self.msg = "Your move."
+        return self
+
+    def _handle_menu(self, ev):
+        if ev.key == pygame.K_DOWN:
+            self.menu = (self.menu + 1) % len(self.MENU)
+        elif ev.key == pygame.K_UP:
+            self.menu = (self.menu - 1) % len(self.MENU)
+        elif ev.key in (pygame.K_RETURN, pygame.K_x):
+            item = self.MENU[self.menu]
+            self.menu = None
+            if item == "PASS":
+                self.confirm = ("pass",)
+                self.msg = "Pass? A/B"
+            elif item == "RESIGN":
+                self.confirm = ("resign",)
+                self.msg = "Resign?A/B"
+            elif item == "INFO":
+                self.info = True
+            elif item == "QUIT":
+                return GamesScene()
+        elif ev.key in (pygame.K_BACKSPACE, pygame.K_z, pygame.K_s):
+            self.menu = None
+        return self
+
     def _coord(self, x, y):
         return "ABCDEFGHJKLMNOPQRST"[x] + str(self.size - y)
+
+    # ---------- draw ----------
+    def _plate(self, s, y, color, name, caps, to_move):
+        retro.dialog_box(s, (224, y, 92, 34))
+        if to_move and self.phase == "play":
+            arrow(s, 228, y + 7, PAL["accent"])
+        retro.stone(s, 240, y + 11, 4, "B" if color == 1 else "W")
+        retro.text(s, name[:8], 248, y + 7)
+        retro.text(s, f"caps {caps}", 240, y + 20, PAL["text_dim"])
 
     def draw(self, s):
         s.fill(PAL["screen"])
@@ -228,30 +401,43 @@ class GameScene:
             col = PAL["white_sh"] if self.board[ly][lx] == 1 else PAL["black_hi"]
             pygame.draw.rect(s, col, (ox + lx * c - 2, oy + ly * c - 2, 4, 4))
         blink = (self.t // 20) % 2 == 0
-        px, py = ox + self.cx * c, oy + self.cy * c
-        if self.confirm:
-            cx, cy = self.confirm
+        if self.confirm and self.confirm[0] == "move":
+            _, cx, cy = self.confirm
             retro.stone(s, ox + cx * c, oy + cy * c, r, "B" if self.my_color == 1 else "W")
             if blink:
                 pygame.draw.circle(s, PAL["accent"], (ox + cx * c, oy + cy * c), r + 2, 1)
-        elif blink:
+        elif self.menu is None and not self.info and blink:
             a = PAL["accent"]
+            px, py = ox + self.cx * c, oy + self.cy * c
             for sx in (-1, 1):
                 for sy in (-1, 1):
                     x0, y0 = px + sx * 10, py + sy * 10
                     pygame.draw.line(s, a, (x0, y0), (x0 - sx * 4, y0))
                     pygame.draw.line(s, a, (x0, y0), (x0, y0 - sy * 4))
-        # rechterkolom
-        retro.dialog_box(s, (224, 14, 92, 52))
-        retro.stone(s, 235, 27, 4, "B")
-        retro.text(s, self.names[0][:8], 243, 23)
-        retro.stone(s, 235, 48, 4, "W")
-        retro.text(s, self.names[1][:8], 243, 44)
-        retro.text(s, f"caps {self.caps[0]}-{self.caps[1]}", 228, 76, PAL["text_dim"])
-        retro.text(s, f"komi {self.komi:g}", 228, 90, PAL["text_dim"])
+        # Pokemon-plates: tegenstander boven, jij onder
+        opp = 2 if self.my_color == 1 else 1
+        me_i, opp_i = self.my_color - 1, opp - 1
+        names = self.names
+        caps = self.caps
+        opp_turn = not self.my_turn
+        self._plate(s, 14, opp, names[opp_i], caps[opp_i], opp_turn)
+        self._plate(s, 156, self.my_color, names[me_i], caps[me_i], self.my_turn)
         retro.dialog_box(s, (224, 198, 92, 28))
         retro.text(s, self.msg[:10], 230, 208)
-        # rustige auto-refresh zolang we wachten
+        # menu-overlay (Pokemon-pauzemenu)
+        if self.menu is not None:
+            retro.dialog_box(s, (224, 56, 92, 92))
+            for i, item in enumerate(self.MENU):
+                y = 64 + i * 20
+                if i == self.menu:
+                    arrow(s, 230, y)
+                retro.text(s, item, 240, y)
+        if self.info:
+            retro.dialog_box(s, (40, 80, 240, 76))
+            retro.text(s, f"{self.speed or 'local'} - {self.rules}", 52, 92)
+            retro.text(s, f"komi {self.komi:g}", 52, 108)
+            retro.text(s, f"move {self.nmoves}", 52, 124)
+            retro.text(s, "B: close", 52, 140, PAL["text_dim"])
         if self.gid and not self.my_turn and self.phase == "play" and self.t and self.t % 2700 == 0:
             threading.Thread(target=self._load, daemon=True).start()
         self.t += 1
@@ -259,18 +445,25 @@ class GameScene:
 
 def main():
     pygame.init()
+    try:
+        pygame.mixer.init()
+    except Exception:
+        pass
     shot = "--shot" in sys.argv
     win = pygame.display.set_mode((W * SCALE, H * SCALE))
     pygame.display.set_caption("flip-go")
     canvas = pygame.Surface((W, H))
     if shot:
         os.makedirs("out", exist_ok=True)
-        for name, scene in (("title", TitleScene()), ("game", GameScene(None))):
+        game = GameScene(None)
+        game.menu = 1
+        for name, scene in (("title", TitleScene()), ("game", game),
+                            ("newgame", NewGameScene())):
             scene.t = 0
             scene.draw(canvas)
             pygame.image.save(pygame.transform.scale(canvas, (W * 2, H * 2)),
                               f"out/{name}.png")
-        print("shots: out/title.png out/game.png")
+        print("shots: out/title.png out/game.png out/newgame.png")
         return
     scene = TitleScene()
     clock = pygame.time.Clock()
