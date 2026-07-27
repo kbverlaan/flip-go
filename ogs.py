@@ -288,6 +288,31 @@ def cancel_challenge(cid):
     return True
 
 
+def my_history(n=10):
+    """Laatste afgeronde potten. -> {id, opp, won, result} nieuwste eerst."""
+    m = me()
+    out = []
+    r = api(f"players/{m['id']}/games", ordering="-ended", page_size=n)
+    for g in r.get("results", []):
+        if not g.get("ended"):
+            continue
+        black = (g.get("players") or {}).get("black", {})
+        white = (g.get("players") or {}).get("white", {})
+        i_black = black.get("id") == m["id"]
+        won = bool(g.get("white_lost") if i_black else g.get("black_lost"))
+        wc = "B" if g.get("white_lost") else "W"
+        o = g.get("outcome", "")
+        if o.endswith("points"):
+            result = f"{wc}+{o.split()[0]}"
+        elif o:
+            result = f"{wc}+{o[0].upper()}"
+        else:
+            result = "?"
+        out.append({"id": g["id"], "opp": (white if i_black else black).get("username", "?"),
+                    "won": won, "result": result})
+    return out
+
+
 def get_player(username):
     r = requests.get(f"{BASE}/players", params={"username": username},
                      headers=UA, timeout=10)
