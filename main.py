@@ -154,23 +154,30 @@ class GamesScene:
 
 
 class NewGameScene:
-    """Nieuwe pot: daily of live. Open challenge, 9x9 ranked."""
-    OPTIONS = (("daily", "3d + 1d per move"), ("live", "2m + 30s per move"))
+    """Nieuwe pot: daily, live (open challenge) of een bot van de bloemenladder."""
+    OPTIONS = (("daily", "3d + 1d per move"),
+               ("live", "2m + 30s per move"),
+               ("bots", "the flower ladder"))
 
     def __init__(self):
         self.sel = 0
         self.t = 0
         self.busy = False
+        self.done = False
         self.msg = None
 
     def handle(self, ev):
         if ev.type != pygame.KEYDOWN or self.busy:
             return self
+        if self.done:
+            return GamesScene()
         if ev.key == pygame.K_DOWN:
-            self.sel = min(1, self.sel + 1)
+            self.sel = min(len(self.OPTIONS) - 1, self.sel + 1)
         elif ev.key == pygame.K_UP:
             self.sel = max(0, self.sel - 1)
         elif ev.key in (pygame.K_RETURN, pygame.K_x):
+            if self.OPTIONS[self.sel][0] == "bots":
+                return BotScene()
             self.busy = True
             self.msg = "Posting..."
             threading.Thread(target=self._create, daemon=True).start()
@@ -182,28 +189,78 @@ class NewGameScene:
         try:
             import ogs
             ogs.create_challenge(self.OPTIONS[self.sel][0])
-            self.msg = "ok"
+            self.msg = "Posted. Any key: games"
+            self.done = True
         except Exception:
             self.msg = "Failed"
-            self.busy = False
+        self.busy = False
 
     def draw(self, s):
         s.fill(PAL["screen"])
         retro.text_c(s, "NEW GAME", W // 2, 14, PAL["box"])
         retro.text_c(s, "9x9 - ranked - japanese", W // 2, 34, PAL["text_dim"])
         for i, (name, desc) in enumerate(self.OPTIONS):
-            y = 70 + i * 44
+            y = 60 + i * 44
             retro.dialog_box(s, (60, y, 200, 38))
             if i == self.sel and (self.t // 20) % 2 == 0:
                 arrow(s, 68, y + 8)
             retro.text(s, name.upper(), 80, y + 7)
             retro.text(s, desc, 80, y + 21, PAL["text_dim"])
-        if self.msg == "ok":
-            retro.text_c(s, "Challenge posted.", W // 2, 180)
-            retro.text_c(s, "B: back to games", W // 2, 196, PAL["text_dim"])
-            self.busy = False
-        elif self.msg:
-            retro.text_c(s, self.msg, W // 2, 188, PAL["text_dim"])
+        if self.msg:
+            retro.text_c(s, self.msg, W // 2, 210, PAL["text_dim"])
+        self.t += 1
+
+
+class BotScene:
+    """De bloemenladder: challenge een bot, die accepteert vanzelf."""
+
+    def __init__(self):
+        import ogs
+        self.flowers = ogs.FLOWERS
+        self.sel = 3      # Bouvardia, de vaste sparringspartner
+        self.t = 0
+        self.busy = False
+        self.done = False
+        self.msg = None
+
+    def handle(self, ev):
+        if ev.type != pygame.KEYDOWN or self.busy:
+            return self
+        if self.done:
+            return GamesScene()
+        if ev.key == pygame.K_DOWN:
+            self.sel = min(len(self.flowers) - 1, self.sel + 1)
+        elif ev.key == pygame.K_UP:
+            self.sel = max(0, self.sel - 1)
+        elif ev.key in (pygame.K_RETURN, pygame.K_x):
+            self.busy = True
+            self.msg = "Challenging..."
+            threading.Thread(target=self._challenge, daemon=True).start()
+        elif ev.key in (pygame.K_BACKSPACE, pygame.K_z):
+            return NewGameScene()
+        return self
+
+    def _challenge(self):
+        try:
+            import ogs
+            ogs.challenge_player(self.flowers[self.sel][1], "live")
+            self.msg = "Sent. Any key: games"
+            self.done = True
+        except Exception:
+            self.msg = "Failed"
+        self.busy = False
+
+    def draw(self, s):
+        s.fill(PAL["screen"])
+        retro.text_c(s, "FLOWER LADDER", W // 2, 14, PAL["box"])
+        for i, (name, _) in enumerate(self.flowers):
+            y = 40 + i * 24
+            retro.dialog_box(s, (76, y, 168, 20))
+            if i == self.sel and (self.t // 20) % 2 == 0:
+                arrow(s, 84, y + 6)
+            retro.text(s, name, 96, y + 6)
+        if self.msg:
+            retro.text_c(s, self.msg, W // 2, 218, PAL["text_dim"])
         self.t += 1
 
 
