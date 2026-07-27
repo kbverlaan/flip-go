@@ -45,11 +45,49 @@ def dialog_box(surf, rect):
     x, y, w, h = rect
     pygame.draw.rect(surf, PAL["box"], (x, y, w, h))
     d = PAL["box_dk"]
-    pygame.draw.rect(surf, d, (x, y, w, h), 2)
-    pygame.draw.rect(surf, PAL["white_sh"], (x + 2, y + 2, w - 4, h - 4), 1)
+    pygame.draw.rect(surf, d, (x, y, w, h), 1)
+    pygame.draw.rect(surf, PAL["white_sh"], (x + 1, y + 1, w - 2, h - 2), 1)
     # hoeken "afronden"
     for cx, cy in ((x, y), (x + w - 1, y), (x, y + h - 1), (x + w - 1, y + h - 1)):
         surf.set_at((cx, cy), PAL["screen"])
+
+_ghosts = {}
+
+
+def ghost(surf, px, py, r, color):
+    """Geditherde steen: 50%-schaakbord zodat een niet-gezette zet
+    onmiskenbaar anders is dan een echte steen."""
+    key = (r, color)
+    if key not in _ghosts:
+        mag = (255, 0, 255)
+        g = pygame.Surface((r * 2 + 2, r * 2 + 2))
+        g.fill(mag)
+        g.set_colorkey(mag)
+        stone(g, r + 1, r + 1, r, color)
+        for y in range(g.get_height()):
+            for x in range(g.get_width()):
+                if (x + y) % 2:
+                    g.set_at((x, y), mag)
+        _ghosts[key] = g
+    surf.blit(_ghosts[key], (px - r - 1, py - r - 1))
+
+
+def text_r(surf, s, right_x, y, color=None, size=8):
+    img = font(size).render(s, False, color or PAL["text"])
+    surf.blit(img, (right_x - img.get_width(), y))
+
+
+def fmt_time(sec):
+    """Seconden -> '2d4h' / '3h05m' / '4:32'."""
+    if sec is None:
+        return ""
+    sec = max(0, int(sec))
+    if sec >= 86400:
+        return f"{sec // 86400}d{(sec % 86400) // 3600}h"
+    if sec >= 3600:
+        return f"{sec // 3600}h{(sec % 3600) // 60:02d}m"
+    return f"{sec // 60}:{sec % 60:02d}"
+
 
 def stone(surf, px, py, r, color):
     """Pixel-steen met 1px outline en glimlicht."""
