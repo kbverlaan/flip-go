@@ -231,10 +231,11 @@ class GamesScene:
             self.t += 1
             return
         rows = self._rows()
-        for i, (kind, data) in enumerate(rows[:5]):
+        off = max(0, min(self.sel - 3, len(rows) - 4))
+        for i, (kind, data) in enumerate(rows[off:off + 4]):
             y = 44 + i * 30
             retro.dialog_box(s, (16, y, 288, 26))
-            if i == self.sel:
+            if i + off == self.sel:
                 arrow(s, 24, y + 9)
             if kind == "game":
                 retro.text(s, f"vs {data['opp'][:19]}", 36, y + 9)
@@ -438,13 +439,14 @@ class HistoryScene:
         elif not self.rows:
             retro.text_c(s, "No finished games.", W // 2, 110, PAL["text_dim"])
         else:
-            for i, r in enumerate(self.rows[:6]):
+            off = max(0, min(self.sel - 4, len(self.rows) - 5))
+            for i, r in enumerate(self.rows[off:off + 5]):
                 y = 44 + i * 30
                 retro.dialog_box(s, (16, y, 288, 26))
-                if i == self.sel:
+                if i + off == self.sel:
                     arrow(s, 24, y + 9)
                 retro.text(s, "won " if r["won"] else "lost", 36, y + 9,
-                           PAL["text"] if r["won"] else PAL["text_dim"])
+                           PAL["green"] if r["won"] else PAL["accent"])
                 retro.text(s, f"vs {r['opp'][:15]}", 76, y + 9)
                 retro.text_r(s, r["result"], 296, y + 9, PAL["text_dim"])
         self.t += 1
