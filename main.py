@@ -147,7 +147,7 @@ class GamesScene:
         for i, (kind, data) in enumerate(rows[:6]):
             y = 44 + i * 30
             retro.dialog_box(s, (16, y, 288, 26))
-            if i == self.sel and (self.t // 20) % 2 == 0:
+            if i == self.sel:
                 arrow(s, 24, y + 9)
             if kind == "game":
                 retro.text(s, f"vs {data['opp'][:19]}", 36, y + 9)
@@ -219,7 +219,7 @@ class NewGameScene:
         for i, (name, desc) in enumerate(self.OPTIONS):
             y = 60 + i * 44
             retro.dialog_box(s, (60, y, 200, 38))
-            if i == self.sel and (self.t // 20) % 2 == 0:
+            if i == self.sel:
                 arrow(s, 68, y + 8)
             retro.text(s, name.upper(), 80, y + 7)
             retro.text(s, desc, 80, y + 21, PAL["text_dim"])
@@ -273,7 +273,7 @@ class BotScene:
         for i, (name, _) in enumerate(self.flowers):
             y = 40 + i * 24
             retro.dialog_box(s, (76, y, 168, 20))
-            if i == self.sel and (self.t // 20) % 2 == 0:
+            if i == self.sel:
                 arrow(s, 84, y + 6)
             retro.text(s, name, 96, y + 6)
         if self.msg:
@@ -474,13 +474,11 @@ class GameScene:
             lx, ly = self.last
             col = PAL["white_sh"] if self.board[ly][lx] == 1 else PAL["black_hi"]
             pygame.draw.rect(s, col, (ox + lx * c - 2, oy + ly * c - 2, 4, 4))
-        blink = (self.t // 20) % 2 == 0
         if self.confirm and self.confirm[0] == "move":
             _, cx, cy = self.confirm
             retro.stone(s, ox + cx * c, oy + cy * c, r, "B" if self.my_color == 1 else "W")
-            if blink:
-                pygame.draw.circle(s, PAL["accent"], (ox + cx * c, oy + cy * c), r + 2, 1)
-        elif self.menu is None and not self.info and blink:
+            pygame.draw.circle(s, PAL["accent"], (ox + cx * c, oy + cy * c), r + 2, 1)
+        elif self.menu is None and not self.info:
             a = PAL["accent"]
             px, py = ox + self.cx * c, oy + self.cy * c
             for sx in (-1, 1):
@@ -512,7 +510,8 @@ class GameScene:
             retro.text(s, f"komi {self.komi:g}", 52, 108)
             retro.text(s, f"move {self.nmoves}", 52, 124)
             retro.text(s, "B: close", 52, 140, PAL["text_dim"])
-        if self.gid and not self.my_turn and self.phase == "play" and self.t and self.t % 2700 == 0:
+        poll = 180 if self.speed in ("live", "blitz") else 1800
+        if self.gid and not self.my_turn and self.phase == "play" and self.t and self.t % poll == 0:
             threading.Thread(target=self._load, daemon=True).start()
         self.t += 1
 
