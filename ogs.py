@@ -123,19 +123,37 @@ def game(gid):
 
 
 def submit_move(gid, x, y, size=9):
-    """Zet insturen via REST. Probeert sgf-coords ('gg'), valt terug op 'G7'."""
-    tok = _token()
-    h = dict(UA)
-    h["Authorization"] = f"Bearer {tok['access_token']}"
-    sgf = chr(97 + x) + chr(97 + y)
-    r = requests.post(f"{BASE}/games/{gid}/move/", json={"move": sgf},
-                      headers=h, timeout=15)
-    if r.status_code >= 400:
-        board = "ABCDEFGHJKLMNOPQRST"[x] + str(size - y)
-        r = requests.post(f"{BASE}/games/{gid}/move/", json={"move": board},
-                          headers=h, timeout=15)
-    r.raise_for_status()
-    return r.json() if r.text else {}
+    """Zet insturen via de realtime socket (zoals de webclient; REST is dood).
+    Wacht op het move-event van de server als bevestiging."""
+    import websocket
+    jwt = api("ui/config")["user_jwt"]
+    my_id = me().get("id")
+    mv = chr(97 + x) + chr(97 + y)
+    ws = websocket.create_connection("wss://online-go.com/socket", timeout=10,
+                                     header=["User-Agent: flip-go/0.1"])
+    try:
+        ws.send(json.dumps(["authenticate", {"jwt": jwt}, 1]))
+        ws.send(json.dumps(["game/connect", {"game_id": gid, "chat": False}, 2]))
+        sent = False
+        t0 = time.time()
+        while time.time() - t0 < 15:
+            m = json.loads(ws.recv())
+            if not (isinstance(m, list) and m):
+                continue
+            tag = m[0]
+            if not sent and isinstance(tag, str) and tag.endswith("gamedata"):
+                ws.send(json.dumps(["game/move",
+                                    {"game_id": gid, "player_id": my_id, "move": mv}]))
+                sent = True
+            elif sent and tag == f"game/{gid}/move":
+                return m[1]                       # server bevestigt onze zet
+            elif sent and isinstance(tag, str) and tag.endswith("error"):
+                raise RuntimeError(f"server weigerde zet: {m[1]}")
+            elif isinstance(tag, str) and tag == "ERROR":
+                raise RuntimeError(f"socket error: {m[1] if len(m) > 1 else '?'}")
+        raise RuntimeError("geen bevestiging van de server (timeout)")
+    finally:
+        ws.close()
 
 
 def get_player(username):
