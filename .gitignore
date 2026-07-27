@@ -2,3 +2,5 @@ out/
 __pycache__/
 .DS_Store
 flip/pylibs/
+version.txt
+conf/

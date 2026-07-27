@@ -39,6 +39,7 @@ export REQUESTS_CA_BUNDLE="$SSL_CERT_FILE"
 export WEBSOCKET_CLIENT_CA_BUNDLE="$SSL_CERT_FILE"
 export PATH="$PYTHONDIR/bin:$PATH"
 
+"$PYTHONDIR/bin/python3" update.py    # OTA: nieuwste code als er WiFi is (faalt stil)
 "$PYTHONDIR/bin/python3" main.py
 
 $ESUDO umount "$PYTHONDIR"
