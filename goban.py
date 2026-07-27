@@ -53,12 +53,11 @@ def from_moves(size, moves, handicap=0):
     last = None
     for i, mv in enumerate(moves):
         x, y = int(mv[0]), int(mv[1])
-        if handicap and i < handicap:
+        first = 2 if handicap else 1     # na handicapstenen begint wit
+        if i < handicap:
             col = 1
         else:
-            col = 1 if (i - handicap) % 2 == 0 else 2
-            if handicap:
-                col = 2 if (i - handicap) % 2 == 0 else 1
+            col = first if (i - handicap) % 2 == 0 else 3 - first
         caps[col] += apply_move(board, x, y, col)
         last = (x, y) if x >= 0 else None
     return board, caps[1], caps[2], last

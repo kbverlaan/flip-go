@@ -1,5 +1,4 @@
-"""OGS REST-laag: publieke endpoints + OAuth2/PKCE-login.
-De realtime socket komt hierna.
+"""OGS-laag: REST (login, potten, challenges) + realtime-socket (zetten).
 
 CLI:  python ogs.py login   (opent browser, vangt callback op :8642)
       python ogs.py me      (test: wie ben ik?)
@@ -19,12 +18,20 @@ from pathlib import Path
 import requests
 
 BASE = "https://online-go.com/api/v1"
-UA = {"User-Agent": "flip-go/0.1 (personal client)"}
 CLIENT_ID = "3SKcBAGtYW2QmKiiYiqy5Q72hzpIgXwohQ7ZpGrr"
 REDIRECT = "http://localhost:8642/callback"
 TOKEN_FILE = Path.home() / ".config" / "flip-go" / "token.json"
+CHALL_FILE = TOKEN_FILE.parent / "challenges.json"
+
+S = requests.Session()
+S.headers["User-Agent"] = "flip-go/0.1 (personal client)"
+
+_tok = None      # token in memory; disk alleen bij start en refresh
+_me = None       # eigen speler-info is sessie-constant
+_jwt = None      # socket-JWT; vernieuwd zodra een socket-commando faalt
 
 
+# ---------- auth ----------
 def login(timeout=180):
     verifier = secrets.token_urlsafe(64)[:128]
     challenge = base64.urlsafe_b64encode(
@@ -56,88 +63,121 @@ def login(timeout=180):
     srv.shutdown()
     if not got.get("code"):
         raise SystemExit("Geen authorization code ontvangen (timeout).")
-    r = requests.post("https://online-go.com/oauth2/token/", data={
+    r = S.post("https://online-go.com/oauth2/token/", data={
         "grant_type": "authorization_code", "code": got["code"],
         "redirect_uri": REDIRECT, "client_id": CLIENT_ID,
-        "code_verifier": verifier}, headers=UA, timeout=15)
+        "code_verifier": verifier}, timeout=15)
     r.raise_for_status()
     _save_token(r.json())
     return True
 
 
 def _save_token(tok):
+    global _tok
     tok["obtained_at"] = time.time()
     TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
     TOKEN_FILE.write_text(json.dumps(tok))
     TOKEN_FILE.chmod(0o600)
+    _tok = tok
 
 
 def _token():
-    if not TOKEN_FILE.exists():
-        return None
-    tok = json.loads(TOKEN_FILE.read_text())
-    if time.time() - tok["obtained_at"] > tok.get("expires_in", 3600) - 120:
-        r = requests.post("https://online-go.com/oauth2/token/", data={
-            "grant_type": "refresh_token", "refresh_token": tok["refresh_token"],
-            "client_id": CLIENT_ID}, headers=UA, timeout=15)
+    global _tok
+    if _tok is None:
+        if not TOKEN_FILE.exists():
+            return None
+        _tok = json.loads(TOKEN_FILE.read_text())
+    if time.time() - _tok["obtained_at"] > _tok.get("expires_in", 3600) - 120:
+        r = S.post("https://online-go.com/oauth2/token/", data={
+            "grant_type": "refresh_token", "refresh_token": _tok["refresh_token"],
+            "client_id": CLIENT_ID}, timeout=15)
         r.raise_for_status()
-        tok = r.json()
-        _save_token(tok)
-    return tok
+        _save_token(r.json())
+    return _tok
 
 
+def _auth():
+    return {"Authorization": f"Bearer {_token()['access_token']}"}
+
+
+# ---------- REST ----------
 def api(path, **params):
-    tok = _token()
-    h = dict(UA)
-    if tok:
-        h["Authorization"] = f"Bearer {tok['access_token']}"
-    r = requests.get(f"{BASE}/{path.lstrip('/')}", params=params, headers=h, timeout=10)
+    h = _auth() if _token() else {}
+    r = S.get(f"{BASE}/{path.lstrip('/')}", params=params, headers=h, timeout=10)
     r.raise_for_status()
     return r.json()
 
 
 def me():
-    return api("me")
+    global _me
+    if _me is None:
+        _me = api("me")
+    return _me
+
+
+def speed_label(sp):
+    return "daily" if sp == "correspondence" else (sp or "?")
+
+
+def format_outcome(winner_is_black, outcome):
+    """'5.5 points' -> 'B+5.5'; 'Resignation' -> 'W+R'."""
+    if not outcome:
+        return "finished"
+    wc = "B" if winner_is_black else "W"
+    if outcome.endswith("points"):
+        return f"{wc}+{outcome.split()[0]}"
+    return f"{wc}+{outcome[0].upper()}"
 
 
 def my_games():
-    """Actieve potten uit het overview. -> lijst {id, black, white, my_turn, size, speed}"""
-    m = me()
+    """Actieve potten uit het overview. -> lijst {id, opp, my_turn, speed}"""
+    mid = me().get("id")
     out = []
     for g in api("ui/overview").get("active_games", []):
         gd = g.get("json", {})
         pl = gd.get("players", {})
-        speed = gd.get("time_control", {}).get("speed", "")
-        black = pl.get("black", {})
-        white = pl.get("white", {})
-        i_am_black = black.get("id") == m.get("id")
+        i_am_black = pl.get("black", {}).get("id") == mid
+        opp = pl.get("white" if i_am_black else "black", {})
         out.append({
             "id": g.get("id"),
-            "black": black.get("username", "?"),
-            "white": white.get("username", "?"),
-            "opp": (white if i_am_black else black).get("username", "?"),
-            "my_color": 1 if i_am_black else 2,
-            "my_id": m.get("id"),
-            "my_turn": gd.get("clock", {}).get("current_player") == m.get("id"),
-            "size": gd.get("width", 9),
-            "speed": "daily" if speed == "correspondence" else (speed or "?"),
+            "opp": opp.get("username", "?"),
+            "my_turn": gd.get("clock", {}).get("current_player") == mid,
+            "speed": speed_label(gd.get("time_control", {}).get("speed", "")),
         })
     return out
 
 
-def game(gid):
-    return api(f"games/{gid}")
+def my_history(n=10):
+    """Laatste afgeronde potten. -> {id, opp, won, result} nieuwste eerst."""
+    mid = me().get("id")
+    out = []
+    for g in api(f"players/{mid}/games", ordering="-ended", page_size=n).get("results", []):
+        if not g.get("ended"):
+            continue
+        black = (g.get("players") or {}).get("black", {})
+        white = (g.get("players") or {}).get("white", {})
+        i_black = black.get("id") == mid
+        out.append({
+            "id": g["id"],
+            "opp": (white if i_black else black).get("username", "?"),
+            "won": bool(g.get("white_lost") if i_black else g.get("black_lost")),
+            "result": format_outcome(g.get("white_lost"), g.get("outcome", "")),
+        })
+    return out
 
 
+# ---------- realtime socket (zetten; REST-move is dood op de server) ----------
 def _game_command(gid, command, payload, confirm_tag):
     """Socket-transactie: connect, wacht op gamedata, stuur command, wacht op
-    bevestigings-event. Zo doet de webclient het ook (REST-move is dood)."""
+    bevestigings-event. Zo doet de webclient het ook."""
+    global _jwt
     import websocket
-    jwt = api("ui/config")["user_jwt"]
+    if _jwt is None:
+        _jwt = api("ui/config")["user_jwt"]
     ws = websocket.create_connection("wss://online-go.com/socket", timeout=10,
                                      header=["User-Agent: flip-go/0.1"])
     try:
-        ws.send(json.dumps(["authenticate", {"jwt": jwt}, 1]))
+        ws.send(json.dumps(["authenticate", {"jwt": _jwt}, 1]))
         ws.send(json.dumps(["game/connect", {"game_id": gid, "chat": False}, 2]))
         sent = False
         t0 = time.time()
@@ -154,11 +194,14 @@ def _game_command(gid, command, payload, confirm_tag):
             elif sent and isinstance(tag, str) and (tag.endswith("error") or tag == "ERROR"):
                 raise RuntimeError(f"server weigerde: {m[1] if len(m) > 1 else '?'}")
         raise RuntimeError("geen bevestiging van de server (timeout)")
+    except Exception:
+        _jwt = None      # bij twijfel verse JWT voor de volgende poging
+        raise
     finally:
         ws.close()
 
 
-def submit_move(gid, x, y, size=9):
+def submit_move(gid, x, y):
     mv = ".." if x < 0 else chr(97 + x) + chr(97 + y)
     return _game_command(gid, "game/move",
                          {"game_id": gid, "player_id": me().get("id"), "move": mv},
@@ -183,6 +226,7 @@ def resign(gid):
     return _game_command(gid, "game/resign", {"game_id": gid}, f"game/{gid}/phase")
 
 
+# ---------- challenges ----------
 TIME_CONTROLS = {
     # fischer: daily = 3d + 1d/zet (cap 7d); live = 2m + 30s/zet (cap 5m)
     "daily": {"system": "fischer", "time_control": "fischer", "speed": "correspondence",
@@ -193,15 +237,21 @@ TIME_CONTROLS = {
              "pause_on_weekends": False},
 }
 
+# De OGS-bloemenladder (alfabetisch = oplopend in sterkte), ids via active-bots
+FLOWERS = [
+    ("Agapanthus", 1195515),
+    ("Amaranthus", 1200334),
+    ("Bergamot", 1195517),
+    ("Bouvardia", 1278465),
+    ("Carnation", 1195518),
+    ("Deutzia", 1195519),
+    ("Echinops", 1195520),
+]
 
-def create_challenge(speed="daily", size=9, ranked=True):
-    """Open 9x9-challenge (japanese, auto-komi). -> challenge-id"""
-    tok = _token()
-    h = dict(UA)
-    h["Authorization"] = f"Bearer {tok['access_token']}"
-    body = {
+
+def _challenge_body(speed, size, ranked):
+    return {
         "challenger_color": "automatic",
-        "min_ranking": 0, "max_ranking": 36,
         "game": {
             "name": "flip-go", "rules": "japanese", "ranked": ranked,
             "width": size, "height": size, "handicap": 0, "komi_auto": "automatic",
@@ -210,16 +260,33 @@ def create_challenge(speed="daily", size=9, ranked=True):
             "time_control_parameters": TIME_CONTROLS[speed],
         },
     }
-    r = requests.post(f"{BASE}/challenges/", json=body, headers=h, timeout=15)
+
+
+def create_challenge(speed="daily", size=9, ranked=True):
+    """Open challenge (japanese, auto-komi)."""
+    body = _challenge_body(speed, size, ranked)
+    body.update(min_ranking=0, max_ranking=36)
+    r = S.post(f"{BASE}/challenges/", json=body, headers=_auth(), timeout=15)
     r.raise_for_status()
     res = r.json()
-    store = _chall_store()
-    store.append({"id": res.get("challenge"), "speed": speed, "size": size})
-    _chall_store(store)
+    _chall_store(_chall_store() + [{"id": res.get("challenge"), "speed": speed, "size": size}])
     return res
 
 
-CHALL_FILE = TOKEN_FILE.parent / "challenges.json"
+def challenge_player(pid, speed="live", size=9, ranked=True):
+    """Directe challenge naar een speler/bot."""
+    r = S.post(f"{BASE}/players/{pid}/challenge/",
+               json=_challenge_body(speed, size, ranked), headers=_auth(), timeout=15)
+    r.raise_for_status()
+    return r.json()
+
+
+def cancel_challenge(cid):
+    r = S.delete(f"{BASE}/challenges/{cid}/", headers=_auth(), timeout=15)
+    if r.status_code not in (200, 204):
+        r.raise_for_status()
+    _chall_store([c for c in _chall_store() if c.get("id") != cid])
+    return True
 
 
 def _chall_store(data=None):
@@ -243,91 +310,6 @@ def my_challenges():
             pass     # geaccepteerd (pot staat dan in de lijst) of verlopen
     _chall_store(out)
     return out
-
-
-# De OGS-bloemenladder (alfabetisch = oplopend in sterkte), ids via active-bots
-FLOWERS = [
-    ("Agapanthus", 1195515),
-    ("Amaranthus", 1200334),
-    ("Bergamot", 1195517),
-    ("Bouvardia", 1278465),
-    ("Carnation", 1195518),
-    ("Deutzia", 1195519),
-    ("Echinops", 1195520),
-]
-
-
-def challenge_player(pid, speed="live", size=9, ranked=True):
-    """Directe challenge naar een speler/bot (zelfde body als open challenge)."""
-    tok = _token()
-    h = dict(UA)
-    h["Authorization"] = f"Bearer {tok['access_token']}"
-    body = {
-        "challenger_color": "automatic",
-        "game": {
-            "name": "flip-go", "rules": "japanese", "ranked": ranked,
-            "width": size, "height": size, "handicap": 0, "komi_auto": "automatic",
-            "disable_analysis": False, "initial_state": None, "private": False,
-            "time_control": "fischer",
-            "time_control_parameters": TIME_CONTROLS[speed],
-        },
-    }
-    r = requests.post(f"{BASE}/players/{pid}/challenge/", json=body, headers=h, timeout=15)
-    r.raise_for_status()
-    return r.json()
-
-
-def cancel_challenge(cid):
-    tok = _token()
-    h = dict(UA)
-    h["Authorization"] = f"Bearer {tok['access_token']}"
-    r = requests.delete(f"{BASE}/challenges/{cid}/", headers=h, timeout=15)
-    if r.status_code not in (200, 204):
-        r.raise_for_status()
-    _chall_store([c for c in _chall_store() if c.get("id") != cid])
-    return True
-
-
-def my_history(n=10):
-    """Laatste afgeronde potten. -> {id, opp, won, result} nieuwste eerst."""
-    m = me()
-    out = []
-    r = api(f"players/{m['id']}/games", ordering="-ended", page_size=n)
-    for g in r.get("results", []):
-        if not g.get("ended"):
-            continue
-        black = (g.get("players") or {}).get("black", {})
-        white = (g.get("players") or {}).get("white", {})
-        i_black = black.get("id") == m["id"]
-        won = bool(g.get("white_lost") if i_black else g.get("black_lost"))
-        wc = "B" if g.get("white_lost") else "W"
-        o = g.get("outcome", "")
-        if o.endswith("points"):
-            result = f"{wc}+{o.split()[0]}"
-        elif o:
-            result = f"{wc}+{o[0].upper()}"
-        else:
-            result = "?"
-        out.append({"id": g["id"], "opp": (white if i_black else black).get("username", "?"),
-                    "won": won, "result": result})
-    return out
-
-
-def get_player(username):
-    r = requests.get(f"{BASE}/players", params={"username": username},
-                     headers=UA, timeout=10)
-    r.raise_for_status()
-    res = r.json().get("results", [])
-    return res[0] if res else None
-
-
-def rating_to_rank(rating):
-    """OGS: rank = ln(rating/525) * 23.15; <30k afkappen."""
-    import math
-    if not rating:
-        return "?"
-    r = math.log(rating / 525) * 23.15
-    return f"{int(30 - r)}k" if r < 30 else f"{int(r - 29)}d"
 
 
 if __name__ == "__main__":

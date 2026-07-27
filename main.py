@@ -19,7 +19,12 @@ import pygame
 import retro
 from retro import PAL, W, H
 
+import goban
+import ogs
+
 SCALE = 2  # 640x480 venster; op de Flip fullscreen 2x
+A_KEYS = (pygame.K_RETURN, pygame.K_x)
+B_KEYS = (pygame.K_BACKSPACE, pygame.K_z)
 
 _stone_snd = None
 
@@ -80,7 +85,6 @@ class GamesScene:
 
     def _load(self):
         try:
-            import ogs
             self.games = ogs.my_games()
             self.seeking = ogs.my_challenges()
         except Exception:
@@ -99,11 +103,11 @@ class GamesScene:
         if ev.type != pygame.KEYDOWN or self.stopping:
             return self
         if self.cancelq:
-            if ev.key in (pygame.K_RETURN, pygame.K_x):
+            if ev.key in A_KEYS:
                 self.stopping = self.cancelq
                 self.cancelq = None
                 threading.Thread(target=self._cancel, args=(self.stopping,), daemon=True).start()
-            elif ev.key in (pygame.K_BACKSPACE, pygame.K_z):
+            elif ev.key in B_KEYS:
                 self.cancelq = None
             return self
         rows = self._rows()
@@ -111,7 +115,7 @@ class GamesScene:
             self.sel = min(len(rows) - 1, self.sel + 1)
         elif ev.key == pygame.K_UP:
             self.sel = max(0, self.sel - 1)
-        elif ev.key in (pygame.K_RETURN, pygame.K_x):
+        elif ev.key in A_KEYS:
             kind, data = rows[self.sel]
             if kind == "game":
                 return GameScene(data["id"])
@@ -123,7 +127,7 @@ class GamesScene:
                 return NewGameScene()
             elif kind == "hist":
                 return HistoryScene()
-        elif ev.key in (pygame.K_BACKSPACE, pygame.K_z):
+        elif ev.key in B_KEYS:
             return TitleScene()
         elif ev.key == pygame.K_r:
             return GamesScene()
@@ -131,7 +135,6 @@ class GamesScene:
 
     def _cancel(self, cid):
         try:
-            import ogs
             ogs.cancel_challenge(cid)
         except Exception:
             pass
@@ -142,7 +145,6 @@ class GamesScene:
     def draw(self, s):
         s.fill(PAL["screen"])
         retro.text_c(s, "YOUR GAMES", W // 2, 14, PAL["box"])
-        retro.text(s, "B back", 264, 14, PAL["text_dim"])
         if self.games is None:
             retro.text_c(s, "loading" + "." * ((self.t // 20) % 4), W // 2, 110, PAL["text_dim"])
             self.t += 1
@@ -181,11 +183,10 @@ class NewGameScene:
     OPTIONS = (("daily", "3d + 1d per move"),
                ("live", "2m + 30s per move"),
                ("bots", "the flower ladder"))
-    BACK = None      # na de klasse-definities gezet
 
-    def __init__(self):
+    def __init__(self, back=None):
+        self.back = back or GamesScene
         self.sel = 0
-        self.t = 0
         self.busy = False
         self.done = False
         self.msg = None
@@ -195,15 +196,15 @@ class NewGameScene:
             return self
         if self.done:
             return GamesScene()
-        if ev.key in (pygame.K_BACKSPACE, pygame.K_z):
-            return self.BACK()
+        if ev.key in B_KEYS:
+            return self.back()
         if self.busy:
             return self
         if ev.key == pygame.K_DOWN:
             self.sel = min(len(self.OPTIONS) - 1, self.sel + 1)
         elif ev.key == pygame.K_UP:
             self.sel = max(0, self.sel - 1)
-        elif ev.key in (pygame.K_RETURN, pygame.K_x):
+        elif ev.key in A_KEYS:
             if self.OPTIONS[self.sel][0] == "bots":
                 return BotScene()
             self.busy = True
@@ -213,7 +214,6 @@ class NewGameScene:
 
     def _create(self):
         try:
-            import ogs
             ogs.create_challenge(self.OPTIONS[self.sel][0])
             self.msg = "Posted. Any key: games"
             self.done = True
@@ -224,7 +224,6 @@ class NewGameScene:
     def draw(self, s):
         s.fill(PAL["screen"])
         retro.text_c(s, "NEW GAME", W // 2, 14, PAL["box"])
-        retro.text(s, "B back", 264, 14, PAL["text_dim"])
         retro.text_c(s, "9x9 - ranked - japanese", W // 2, 34, PAL["text_dim"])
         for i, (name, desc) in enumerate(self.OPTIONS):
             y = 60 + i * 44
@@ -235,18 +234,15 @@ class NewGameScene:
             retro.text(s, desc, 80, y + 21, PAL["text_dim"])
         if self.msg:
             retro.text_c(s, self.msg, W // 2, 210, PAL["text_dim"])
-        self.t += 1
 
 
 class BotScene:
     """De bloemenladder: challenge een bot, die accepteert vanzelf."""
-    BACK = None
 
-    def __init__(self):
-        import ogs
+    def __init__(self, back=None):
+        self.back = back or NewGameScene
         self.flowers = ogs.FLOWERS
         self.sel = 3      # Bouvardia, de vaste sparringspartner
-        self.t = 0
         self.busy = False
         self.done = False
         self.msg = None
@@ -256,15 +252,15 @@ class BotScene:
             return self
         if self.done:
             return GamesScene()
-        if ev.key in (pygame.K_BACKSPACE, pygame.K_z):
-            return self.BACK()
+        if ev.key in B_KEYS:
+            return self.back()
         if self.busy:
             return self
         if ev.key == pygame.K_DOWN:
             self.sel = min(len(self.flowers) - 1, self.sel + 1)
         elif ev.key == pygame.K_UP:
             self.sel = max(0, self.sel - 1)
-        elif ev.key in (pygame.K_RETURN, pygame.K_x):
+        elif ev.key in A_KEYS:
             self.busy = True
             self.msg = "Challenging..."
             threading.Thread(target=self._challenge, daemon=True).start()
@@ -272,7 +268,6 @@ class BotScene:
 
     def _challenge(self):
         try:
-            import ogs
             ogs.challenge_player(self.flowers[self.sel][1], "daily")
             self.msg = "Sent. Any key: games"
             self.done = True
@@ -283,7 +278,6 @@ class BotScene:
     def draw(self, s):
         s.fill(PAL["screen"])
         retro.text_c(s, "FLOWER LADDER", W // 2, 14, PAL["box"])
-        retro.text(s, "B back", 264, 14, PAL["text_dim"])
         for i, (name, _) in enumerate(self.flowers):
             y = 40 + i * 24
             retro.dialog_box(s, (76, y, 168, 20))
@@ -292,7 +286,6 @@ class BotScene:
             retro.text(s, name, 96, y + 6)
         if self.msg:
             retro.text_c(s, self.msg, W // 2, 218, PAL["text_dim"])
-        self.t += 1
 
 
 class HistoryScene:
@@ -306,7 +299,6 @@ class HistoryScene:
 
     def _load(self):
         try:
-            import ogs
             self.rows = ogs.my_history()
         except Exception:
             self.rows = []
@@ -314,21 +306,20 @@ class HistoryScene:
     def handle(self, ev):
         if ev.type != pygame.KEYDOWN:
             return self
-        if ev.key in (pygame.K_BACKSPACE, pygame.K_z):
+        if ev.key in B_KEYS:
             return GamesScene()
         rows = self.rows or []
         if ev.key == pygame.K_DOWN and rows:
             self.sel = min(len(rows) - 1, self.sel + 1)
         elif ev.key == pygame.K_UP and rows:
             self.sel = max(0, self.sel - 1)
-        elif ev.key in (pygame.K_RETURN, pygame.K_x) and rows:
+        elif ev.key in A_KEYS and rows:
             return GameScene(rows[self.sel]["id"], back=HistoryScene)
         return self
 
     def draw(self, s):
         s.fill(PAL["screen"])
         retro.text_c(s, "HISTORY", W // 2, 14, PAL["box"])
-        retro.text(s, "B back", 264, 14, PAL["text_dim"])
         if self.rows is None:
             retro.text_c(s, "loading" + "." * ((self.t // 20) % 4), W // 2, 110, PAL["text_dim"])
         elif not self.rows:
@@ -374,6 +365,10 @@ class GameScene:
         self.black_id = None
         self.nmoves = 0
         self.confirm = None      # ("move",x,y) | ("pass",) | ("resign",)
+        self._snap = None        # door _load gepubliceerd, door draw overgenomen
+        self._loading = False
+        self._bg = None
+        self._bg_size = None
         self.menu = None         # None | cursor-index
         self.info = False
         self.busy = False
@@ -389,49 +384,42 @@ class GameScene:
 
     # ---------- data ----------
     def _load(self):
+        self._loading = True
         try:
-            import ogs
-            import goban
-            g = ogs.api(f"games/{self.gid}")
-            gd = g.get("gamedata", {})
-            self.size = gd.get("width", 9)
+            gd = ogs.api(f"games/{self.gid}").get("gamedata", {})
             pl = gd.get("players", {})
-            self.names = (pl.get("black", {}).get("username", "?"),
-                          pl.get("white", {}).get("username", "?"))
-            self.komi = float(gd.get("komi", 6.5))
-            self.rules = gd.get("rules", "japanese")
-            sp = gd.get("time_control", {}).get("speed", "")
-            self.speed = "daily" if sp == "correspondence" else sp
-            self.phase = gd.get("phase", "play")
-            self.outcome = gd.get("outcome", "")
-            self.winner_id = gd.get("winner")
-            self.black_id = pl.get("black", {}).get("id")
+            size = gd.get("width", 9)
             moves = gd.get("moves", [])
-            board, cb, cw, last = goban.from_moves(self.size, moves, gd.get("handicap", 0))
+            board, cb, cw, last = goban.from_moves(size, moves, gd.get("handicap", 0))
+            me_id = ogs.me().get("id")
+            black_id = pl.get("black", {}).get("id")
+            cur = gd.get("clock", {}).get("current_player")
+            phase = gd.get("phase", "play")
             if len(moves) > self.nmoves and self.nmoves:
                 play_stone()          # nieuwe zet binnengekomen
-            self.nmoves = len(moves)
-            self.board, self.caps, self.last = board, (cb, cw), last
-            m = ogs.me()
-            self.me_id = m.get("id")
-            self.my_color = 1 if self.black_id == self.me_id else 2
-            cur = gd.get("clock", {}).get("current_player")
-            self.my_turn = cur == self.me_id
-            self.turn_color = 1 if cur == self.black_id else 2
-            if self.phase == "finished":
-                self.msg = "The end."
-            elif self.phase == "stone removal":
-                self.msg = "Counting"
-            else:
-                self.msg = "Your move." if self.my_turn else "Waiting..."
+            # alles in één publicatie; draw neemt hem op de main thread over
+            self._snap = dict(
+                size=size, board=board, caps=(cb, cw), last=last, nmoves=len(moves),
+                names=(pl.get("black", {}).get("username", "?"),
+                       pl.get("white", {}).get("username", "?")),
+                komi=float(gd.get("komi", 6.5)), rules=gd.get("rules", "japanese"),
+                speed=ogs.speed_label(gd.get("time_control", {}).get("speed", "")),
+                phase=phase, outcome=gd.get("outcome", ""),
+                winner_id=gd.get("winner"), black_id=black_id, me_id=me_id,
+                my_color=1 if black_id == me_id else 2, my_turn=cur == me_id,
+                turn_color=1 if cur == black_id else 2,
+                msg=("The end." if phase == "finished" else
+                     "Counting" if phase == "stone removal" else
+                     "Your move." if cur == me_id else "Waiting..."))
         except Exception:
-            self.msg = "Load failed"
+            self._snap = {"msg": "Load failed"}
+        finally:
+            self._loading = False
 
     def _do(self, action):
         try:
-            import ogs
             if action[0] == "move":
-                ogs.submit_move(self.gid, action[1], action[2], self.size)
+                ogs.submit_move(self.gid, action[1], action[2])
                 play_stone()
             elif action[0] == "pass":
                 ogs.pass_move(self.gid)
@@ -444,14 +432,6 @@ class GameScene:
             self.msg = f"{action[0]} failed"[:10]
         self.busy = False
 
-    def _outcome_str(self):
-        if not self.outcome:
-            return "finished"
-        wc = "B" if self.winner_id == self.black_id else "W"
-        if self.outcome.endswith("points"):
-            return f"{wc}+{self.outcome.split()[0]}"
-        return f"{wc}+{self.outcome[0]}"     # Resignation -> R, Timeout -> T
-
     # ---------- input ----------
     def handle(self, ev):
         if ev.type != pygame.KEYDOWN or self.busy:
@@ -463,15 +443,14 @@ class GameScene:
             return self._handle_confirm(ev)
         if self.menu is not None:
             return self._handle_menu(ev)
-        if self.phase == "finished" and ev.key in (pygame.K_RETURN, pygame.K_x,
-                                                   pygame.K_BACKSPACE, pygame.K_z):
+        if self.phase == "finished" and ev.key in A_KEYS + B_KEYS:
             return self.back() if self.gid else TitleScene()
         if self.phase == "stone removal":
-            if ev.key in (pygame.K_RETURN, pygame.K_x):
+            if ev.key in A_KEYS:
                 self.busy = True
                 self.msg = "Sending..."
                 threading.Thread(target=self._do, args=(("accept",),), daemon=True).start()
-            elif ev.key in (pygame.K_BACKSPACE, pygame.K_z):
+            elif ev.key in B_KEYS:
                 return GamesScene()
             return self
         dx = (ev.key == pygame.K_RIGHT) - (ev.key == pygame.K_LEFT)
@@ -479,7 +458,7 @@ class GameScene:
         if dx or dy:
             self.cx = max(0, min(self.size - 1, self.cx + dx))
             self.cy = max(0, min(self.size - 1, self.cy + dy))
-        elif ev.key in (pygame.K_RETURN, pygame.K_x):
+        elif ev.key in A_KEYS:
             if self.my_turn and self.phase == "play" and self.board[self.cy][self.cx] == 0:
                 self.confirm = ("move", self.cx, self.cy)
                 self.msg = self._coord(self.cx, self.cy) + "? A/B"
@@ -490,12 +469,12 @@ class GameScene:
             if self.gid:
                 self.msg = "..."
                 threading.Thread(target=self._load, daemon=True).start()
-        elif ev.key in (pygame.K_BACKSPACE, pygame.K_z):
+        elif ev.key in B_KEYS:
             return self.back() if self.gid else TitleScene()
         return self
 
     def _handle_confirm(self, ev):
-        if ev.key in (pygame.K_RETURN, pygame.K_x):
+        if ev.key in A_KEYS:
             action = self.confirm
             self.confirm = None
             if self.gid:
@@ -506,7 +485,7 @@ class GameScene:
                 self.board[action[2]][action[1]] = 1
                 play_stone()
                 self.msg = "You: " + self._coord(action[1], action[2])
-        elif ev.key in (pygame.K_BACKSPACE, pygame.K_z):
+        elif ev.key in B_KEYS:
             self.confirm = None
             self.msg = "Your move."
         return self
@@ -516,7 +495,7 @@ class GameScene:
             self.menu = (self.menu + 1) % len(self.MENU)
         elif ev.key == pygame.K_UP:
             self.menu = (self.menu - 1) % len(self.MENU)
-        elif ev.key in (pygame.K_RETURN, pygame.K_x):
+        elif ev.key in A_KEYS:
             item = self.MENU[self.menu]
             self.menu = None
             if item == "PASS":
@@ -528,8 +507,8 @@ class GameScene:
             elif item == "INFO":
                 self.info = True
             elif item == "QUIT":
-                return GamesScene()
-        elif ev.key in (pygame.K_BACKSPACE, pygame.K_z, pygame.K_s):
+                return self.back()
+        elif ev.key in B_KEYS + (pygame.K_s,):
             self.menu = None
         return self
 
@@ -545,21 +524,36 @@ class GameScene:
         retro.text(s, name[:9], 244, y + 7)
         retro.text(s, f"caps {caps}", 238, y + 20, PAL["text_dim"])
 
+    def _board_bg(self):
+        """Statisch bord (hout, raster, hoshi) 1x gerenderd per bordmaat."""
+        if self._bg is None or self._bg_size != self.size:
+            n = self.size
+            c = min(23, 184 // max(1, n - 1))
+            span = c * (n - 1)
+            o = (212 - span) // 2
+            bg = pygame.Surface((212, 212))
+            bg.fill(PAL["wood"])
+            pygame.draw.rect(bg, PAL["line"], (0, 0, 212, 212), 1)
+            for i in range(n):
+                pygame.draw.line(bg, PAL["line"], (o, o + i * c), (o + span, o + i * c))
+                pygame.draw.line(bg, PAL["line"], (o + i * c, o), (o + i * c, o + span))
+            if n == 9:
+                for hx, hy in ((2, 2), (6, 2), (4, 4), (2, 6), (6, 6)):
+                    pygame.draw.circle(bg, PAL["line"], (o + hx * c, o + hy * c), 2)
+            self._bg, self._bg_size = bg, n
+        return self._bg
+
     def draw(self, s):
+        if self._snap:               # atomaire overname van een verse load
+            self.__dict__.update(self._snap)
+            self._snap = None
         s.fill(PAL["screen"])
-        pygame.draw.rect(s, PAL["wood"], (4, 14, 212, 212))
-        pygame.draw.rect(s, PAL["line"], (4, 14, 212, 212), 1)
+        s.blit(self._board_bg(), (4, 14))
         n = self.size
         c = min(23, 184 // max(1, n - 1))
         span = c * (n - 1)
         ox = 4 + (212 - span) // 2
         oy = 14 + (212 - span) // 2
-        for i in range(n):
-            pygame.draw.line(s, PAL["line"], (ox, oy + i * c), (ox + span, oy + i * c))
-            pygame.draw.line(s, PAL["line"], (ox + i * c, oy), (ox + i * c, oy + span))
-        if n == 9:
-            for hx, hy in ((2, 2), (6, 2), (4, 4), (2, 6), (6, 6)):
-                pygame.draw.circle(s, PAL["line"], (ox + hx * c, oy + hy * c), 2)
         r = max(4, c * 2 // 5 + 1)
         for y in range(n):
             for x in range(n):
@@ -609,7 +603,8 @@ class GameScene:
             retro.dialog_box(s, (40, 84, 240, 68))
             retro.text_c(s, "YOU WON" if won else "YOU LOST", 160, 98,
                          PAL["green"] if won else PAL["accent"])
-            retro.text_c(s, self._outcome_str(), 160, 116)
+            retro.text_c(s, ogs.format_outcome(self.winner_id == self.black_id,
+                                               self.outcome), 160, 116)
             retro.text_c(s, "A: back to games", 160, 134, PAL["text_dim"])
         elif self.phase == "stone removal" and not self.busy:
             retro.dialog_box(s, (40, 84, 240, 68))
@@ -617,14 +612,10 @@ class GameScene:
             retro.text_c(s, "A: accept result", 160, 116)
             retro.text_c(s, "B: back to games", 160, 134, PAL["text_dim"])
         poll = 180 if self.speed in ("live", "blitz") else 1800
-        if (self.gid and self.t and self.t % poll == 0 and
+        if (self.gid and self.t and self.t % poll == 0 and not self._loading and
                 (self.phase == "stone removal" or (playing and not self.my_turn))):
             threading.Thread(target=self._load, daemon=True).start()
         self.t += 1
-
-
-NewGameScene.BACK = GamesScene
-BotScene.BACK = NewGameScene
 
 
 def main():
@@ -660,9 +651,8 @@ def main():
                     return
                 ev = pygame.event.Event(pygame.KEYDOWN, key=pygame.K_BACKSPACE)
             scene = scene.handle(ev)
-        canvas.fill((0, 0, 0))
         scene.draw(canvas)
-        win.blit(pygame.transform.scale(canvas, win.get_size()), (0, 0))
+        pygame.transform.scale(canvas, win.get_size(), win)
         pygame.display.flip()
         clock.tick(60)
 
