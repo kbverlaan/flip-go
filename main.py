@@ -47,7 +47,7 @@ class TitleScene:
 
 class GameScene:
     """Mock-pot voor de look; OGS-koppeling komt hierna."""
-    CELL = 20
+    CELL = 23
 
     def __init__(self):
         self.size = 9
@@ -69,17 +69,17 @@ class GameScene:
         elif ev.key in (pygame.K_RETURN, pygame.K_x):
             if self.board[self.cy][self.cx] == 0:
                 self.board[self.cy][self.cx] = 1
-                self.msg = f"You played {'ABCDEFGHJ'[self.cx]}{9 - self.cy}."
+                self.msg = f"You: {'ABCDEFGHJ'[self.cx]}{9 - self.cy}"
         elif ev.key in (pygame.K_BACKSPACE, pygame.K_z):
             return TitleScene()
         return self
 
     def draw(self, s):
         s.fill(PAL["screen"])
-        # bord
-        pygame.draw.rect(s, PAL["wood"], (8, 8, 184, 184))
-        pygame.draw.rect(s, PAL["line"], (8, 8, 184, 184), 1)
-        ox = oy = 8 + 12
+        # bord: het spel krijgt de ruimte
+        pygame.draw.rect(s, PAL["wood"], (4, 14, 212, 212))
+        pygame.draw.rect(s, PAL["line"], (4, 14, 212, 212), 1)
+        ox, oy = 4 + 14, 14 + 14
         c = self.CELL
         for i in range(9):
             pygame.draw.line(s, PAL["line"], (ox, oy + i * c), (ox + 8 * c, oy + i * c))
@@ -89,7 +89,7 @@ class GameScene:
         for y in range(9):
             for x in range(9):
                 if self.board[y][x]:
-                    retro.stone(s, ox + x * c, oy + y * c, 8,
+                    retro.stone(s, ox + x * c, oy + y * c, 9,
                                 "B" if self.board[y][x] == 1 else "W")
         # cursor: vier rode hoekjes, knipperend
         if (self.t // 20) % 2 == 0:
@@ -97,23 +97,19 @@ class GameScene:
             a = PAL["accent"]
             for sx in (-1, 1):
                 for sy in (-1, 1):
-                    x0, y0 = px + sx * 9, py + sy * 9
+                    x0, y0 = px + sx * 10, py + sy * 10
                     pygame.draw.line(s, a, (x0, y0), (x0 - sx * 4, y0))
                     pygame.draw.line(s, a, (x0, y0), (x0, y0 - sy * 4))
-        # zijpaneel
-        retro.dialog_box(s, (200, 8, 112, 74))
-        retro.stone(s, 212, 22, 5, "B")
-        retro.text(s, "kiemsan_", 222, 18)
-        retro.text(s, "10:00", 222, 30, PAL["text_dim"])
-        retro.stone(s, 212, 50, 5, "W")
-        retro.text(s, "amybot", 222, 46)
-        retro.text(s, "10:00", 222, 58, PAL["text_dim"])
-        retro.dialog_box(s, (200, 90, 112, 40))
-        retro.text(s, "caps  0-0", 208, 98)
-        retro.text(s, "komi  6.5", 208, 112)
-        # dialoog
-        retro.dialog_box(s, (4, 196, 312, 40))
-        retro.text(s, self.msg, 14, 206)
+        # rechterkolom: een klein spelersblok, verder rust
+        retro.dialog_box(s, (224, 14, 92, 52))
+        retro.stone(s, 235, 27, 4, "B")
+        retro.text(s, "kiemsan_", 243, 23)
+        retro.stone(s, 235, 48, 4, "W")
+        retro.text(s, "amybot", 243, 44)
+        retro.text(s, "10:00 0-0", 228, 76, PAL["text_dim"])
+        retro.text(s, "komi 6.5", 228, 90, PAL["text_dim"])
+        retro.dialog_box(s, (224, 198, 92, 28))
+        retro.text(s, self.msg, 230, 208)
         self.t += 1
 
 
