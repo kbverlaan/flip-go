@@ -12,7 +12,6 @@ ASSETS = Path(__file__).parent / "assets"
 PAL = {
     "screen":   (24, 32, 28),     # buiten het bord
     "wood":     (222, 178, 106),  # bordhout
-    "wood_dk":  (198, 150, 78),   # afwisselende houtnerf
     "line":     (110, 74, 30),
     "black":    (44, 44, 52),
     "black_hi": (92, 92, 104),
