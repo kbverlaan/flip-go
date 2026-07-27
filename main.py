@@ -28,11 +28,11 @@ A_KEYS = (pygame.K_RETURN, pygame.K_x)
 B_KEYS = (pygame.K_BACKSPACE, pygame.K_z)
 
 # Flip-gamepad -> toetsen (X360-schema; zet Controls in het PM-menu op X360)
+# Miyoo Flip (Knulli): A=0 B=1 X=2 Y=3 schouders=4-7 select=8 start=9 dpad=13-16
 PAD_BUTTONS = {0: pygame.K_RETURN, 1: pygame.K_BACKSPACE, 2: pygame.K_r,
-               3: pygame.K_ESCAPE, 6: pygame.K_s, 7: pygame.K_s,
-               8: pygame.K_s, 9: pygame.K_s, 10: pygame.K_s,
-               11: pygame.K_UP, 12: pygame.K_DOWN,
-               13: pygame.K_LEFT, 14: pygame.K_RIGHT}
+               3: pygame.K_ESCAPE, 8: pygame.K_s, 9: pygame.K_s,
+               13: pygame.K_UP, 14: pygame.K_DOWN,
+               15: pygame.K_LEFT, 16: pygame.K_RIGHT}
 HAT_KEYS = {(0, 1): pygame.K_UP, (0, -1): pygame.K_DOWN,
             (-1, 0): pygame.K_LEFT, (1, 0): pygame.K_RIGHT}
 
