@@ -108,9 +108,9 @@ def draw_status(s):
         pygame.draw.rect(s, PAL["green"] if charging else col, (300, 7, w, 4))
     if wifi is True:
         for i, h in enumerate((2, 4, 6)):
-            pygame.draw.rect(s, PAL["text_dim"], (282 + i * 4, 11 - h, 3, h))
+            pygame.draw.rect(s, PAL["text_dim"], (282 + i * 4, 13 - h, 3, h))
     elif wifi is False:
-        pygame.draw.rect(s, PAL["accent"], (282, 5, 3, 6))
+        pygame.draw.rect(s, PAL["accent"], (282, 7, 3, 6))
 
 
 def arrow(s, x, y, color=None):
