@@ -26,6 +26,28 @@ SCALE = 2  # 640x480 venster; op de Flip fullscreen 2x
 A_KEYS = (pygame.K_RETURN, pygame.K_x)
 B_KEYS = (pygame.K_BACKSPACE, pygame.K_z)
 
+# Flip-gamepad -> toetsen (X360-schema; zet Controls in het PM-menu op X360)
+PAD_BUTTONS = {0: pygame.K_RETURN, 1: pygame.K_BACKSPACE, 2: pygame.K_r,
+               3: pygame.K_ESCAPE, 6: pygame.K_s, 7: pygame.K_s,
+               8: pygame.K_s, 9: pygame.K_s, 10: pygame.K_s,
+               11: pygame.K_UP, 12: pygame.K_DOWN,
+               13: pygame.K_LEFT, 14: pygame.K_RIGHT}
+HAT_KEYS = {(0, 1): pygame.K_UP, (0, -1): pygame.K_DOWN,
+            (-1, 0): pygame.K_LEFT, (1, 0): pygame.K_RIGHT}
+
+
+def pad_translate(ev):
+    """Gamepad-event -> synthetisch KEYDOWN-event (of None)."""
+    if ev.type == pygame.JOYBUTTONDOWN:
+        k = PAD_BUTTONS.get(ev.button)
+        if k is None:
+            print(f"pad: unmapped button {ev.button}")
+            return None
+        return pygame.event.Event(pygame.KEYDOWN, key=k)
+    if ev.type == pygame.JOYHATMOTION and ev.value in HAT_KEYS:
+        return pygame.event.Event(pygame.KEYDOWN, key=HAT_KEYS[ev.value])
+    return None
+
 _stone_snd = None
 
 
@@ -624,6 +646,9 @@ def main():
         pygame.mixer.init()
     except Exception:
         pass
+    pygame.joystick.init()
+    for i in range(pygame.joystick.get_count()):
+        pygame.joystick.Joystick(i).init()
     shot = "--shot" in sys.argv
     win = pygame.display.set_mode((W * SCALE, H * SCALE))
     pygame.display.set_caption("flip-go")
@@ -646,6 +671,7 @@ def main():
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT:
                 return
+            ev = pad_translate(ev) or ev
             if ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
                 if isinstance(scene, TitleScene):
                     return
