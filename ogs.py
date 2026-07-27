@@ -155,11 +155,13 @@ def my_games():
         pl = gd.get("players", {})
         i_am_black = pl.get("black", {}).get("id") == mid
         opp = pl.get("white" if i_am_black else "black", {})
+        exp = gd.get("clock", {}).get("expiration")
         out.append({
             "id": g.get("id"),
             "opp": opp.get("username", "?"),
             "my_turn": gd.get("clock", {}).get("current_player") == mid,
             "speed": speed_label(gd.get("time_control", {}).get("speed", "")),
+            "left": max(0, exp / 1000 - time.time()) if exp else None,
         })
     return out
 

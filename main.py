@@ -238,9 +238,12 @@ class GamesScene:
                 arrow(s, 24, y + 9)
             if kind == "game":
                 retro.text(s, f"vs {data['opp'][:19]}", 36, y + 9)
-                retro.text(s, data["speed"], 240, y + 9, PAL["text_dim"])
-                if data["my_turn"]:
+                if data["my_turn"] and data.get("left"):
+                    retro.text_r(s, retro.fmt_time(data["left"]), 296, y + 9)
+                elif data["my_turn"]:
                     retro.text(s, "*", 288, y + 9, PAL["accent"])
+                else:
+                    retro.text_r(s, data["speed"], 296, y + 9, PAL["text_dim"])
             elif kind == "seek":
                 if self.stopping == data["id"]:
                     retro.text(s, "stopping...", 36, y + 9, PAL["text_dim"])
@@ -386,14 +389,14 @@ class BotScene:
         s.fill(PAL["screen"])
         retro.text_c(s, "FLOWER LADDER", W // 2, 14, PAL["box"])
         for i, (name, _) in enumerate(self.flowers):
-            y = 40 + i * 24
-            retro.dialog_box(s, (76, y, 168, 20))
+            y = 44 + i * 26
+            retro.dialog_box(s, (64, y, 192, 22))
             if i == self.sel:
-                arrow(s, 84, y + 6)
-            retro.text(s, name, 96, y + 6)
+                arrow(s, 72, y + 7)
+            retro.text(s, name, 84, y + 7)
             rk = self.ranks.get(self.flowers[i][1])
             if rk:
-                retro.text(s, rk, 212, y + 6, PAL["text_dim"])
+                retro.text_r(s, rk, 248, y + 7, PAL["text_dim"])
         if self.msg:
             retro.text_c(s, self.msg, W // 2, 218, PAL["text_dim"])
 
@@ -441,9 +444,9 @@ class HistoryScene:
                 if i == self.sel:
                     arrow(s, 24, y + 9)
                 retro.text(s, "won " if r["won"] else "lost", 36, y + 9,
-                           PAL["green"] if r["won"] else PAL["accent"])
+                           PAL["text"] if r["won"] else PAL["text_dim"])
                 retro.text(s, f"vs {r['opp'][:15]}", 76, y + 9)
-                retro.text(s, r["result"], 240, y + 9, PAL["text_dim"])
+                retro.text_r(s, r["result"], 296, y + 9, PAL["text_dim"])
         self.t += 1
 
 
@@ -463,6 +466,7 @@ class GameScene:
         self.last = None
         self.names = ("black", "white")
         self.komi = 6.5
+        self.times = ("", "")
         self.rules = "japanese"
         self.speed = ""
         self.my_color = 1
@@ -503,8 +507,23 @@ class GameScene:
             board, cb, cw, last = goban.from_moves(size, moves, gd.get("handicap", 0))
             me_id = ogs.me().get("id")
             black_id = pl.get("black", {}).get("id")
-            cur = gd.get("clock", {}).get("current_player")
+            clk = gd.get("clock", {})
+            cur = clk.get("current_player")
             phase = gd.get("phase", "play")
+
+            def side_time(k):
+                t = clk.get(k)
+                if isinstance(t, dict):
+                    return t.get("thinking_time")
+                return t if isinstance(t, (int, float)) else None
+            bt, wt = side_time("black_time"), side_time("white_time")
+            if clk.get("expiration"):
+                rem = clk["expiration"] / 1000 - time.time()
+                if cur == black_id:
+                    bt = rem
+                else:
+                    wt = rem
+            passed = bool(moves) and moves[-1][0] < 0 and phase == "play"
             if len(moves) > self.nmoves and self.nmoves:
                 play_stone()          # nieuwe zet binnengekomen
             # alles in één publicatie; draw neemt hem op de main thread over
@@ -518,8 +537,10 @@ class GameScene:
                 winner_id=gd.get("winner"), black_id=black_id, me_id=me_id,
                 my_color=1 if black_id == me_id else 2, my_turn=cur == me_id,
                 turn_color=1 if cur == black_id else 2,
+                times=(retro.fmt_time(bt), retro.fmt_time(wt)),
                 msg=("The end." if phase == "finished" else
                      "Counting" if phase == "stone removal" else
+                     "Opp passed" if passed and cur == me_id else
                      "Your move." if cur == me_id else "Waiting..."))
         except Exception:
             self._snap = {"msg": "Load failed"}
@@ -636,8 +657,10 @@ class GameScene:
         if to_move and self.phase == "play":
             arrow(s, 227, y + 7, PAL["accent"])
         retro.stone(s, 238, y + 11, 4, "B" if color == 1 else "W")
-        retro.text(s, name[:9], 244, y + 7)
-        retro.text(s, f"caps {caps}", 238, y + 20, PAL["text_dim"])
+        retro.text(s, name[:8], 244, y + 7)
+        retro.text(s, f"c:{caps}", 238, y + 20, PAL["text_dim"])
+        retro.text_r(s, self.times[color - 1], 312, y + 20,
+                     PAL["text"] if to_move and self.phase == "play" else PAL["text_dim"])
 
     def _board_bg(self):
         """Statisch bord (hout, raster, hoshi) 1x gerenderd per bordmaat."""
@@ -684,13 +707,7 @@ class GameScene:
             can_play = (self.my_turn and self.phase == "play" and not self.busy
                         and self.board[self.cy][self.cx] == 0)
             if can_play:
-                # ghost-steen: je ziet wat A gaat doen
-                ghost = pygame.Surface((r * 2 + 4, r * 2 + 4))
-                ghost.fill((255, 0, 255))
-                ghost.set_colorkey((255, 0, 255))
-                retro.stone(ghost, r + 2, r + 2, r, "B" if self.my_color == 1 else "W")
-                ghost.set_alpha(140)
-                s.blit(ghost, (px - r - 2, py - r - 2))
+                retro.ghost(s, px, py, r, "B" if self.my_color == 1 else "W")
             else:
                 a = PAL["accent"]
                 for sx in (-1, 1):
@@ -703,7 +720,9 @@ class GameScene:
         self._plate(s, 14, 1, self.names[0], self.caps[0], playing and self.turn_color == 1)
         self._plate(s, 52, 2, self.names[1], self.caps[1], playing and self.turn_color == 2)
         retro.dialog_box(s, (224, 198, 92, 28))
-        retro.text(s, self.msg[:10], 230, 208)
+        retro.text(s, self.msg[:10], 230, 203)
+        if self.gid and playing and self.menu is None:
+            retro.text(s, "start menu", 230, 214, PAL["text_dim"])
         # menu tussen plates en berichtvak (Pokemon-pauzemenu)
         if self.menu is not None:
             retro.dialog_box(s, (224, 96, 92, 92))
@@ -713,24 +732,24 @@ class GameScene:
                     arrow(s, 230, y)
                 retro.text(s, item, 240, y)
         if self.info:
-            retro.dialog_box(s, (40, 80, 240, 76))
-            retro.text(s, f"{self.speed or 'local'} - {self.rules}", 52, 92)
-            retro.text(s, f"komi {self.komi:g}", 52, 108)
-            retro.text(s, f"move {self.nmoves}", 52, 124)
-            retro.text(s, "B: close", 52, 140, PAL["text_dim"])
+            retro.dialog_box(s, (224, 96, 92, 92))
+            retro.text(s, self.speed or "local", 232, 104)
+            retro.text(s, self.rules[:10], 232, 118, PAL["text_dim"])
+            retro.text(s, f"komi {self.komi:g}", 232, 136)
+            retro.text(s, f"move {self.nmoves}", 232, 150)
+            retro.text(s, "B close", 232, 168, PAL["text_dim"])
         if self.phase == "finished" and self.gid:
             won = self.winner_id == self.me_id
-            retro.dialog_box(s, (40, 84, 240, 68))
-            retro.text_c(s, "YOU WON" if won else "YOU LOST", 160, 98,
-                         PAL["green"] if won else PAL["accent"])
+            retro.dialog_box(s, (224, 96, 92, 92))
+            retro.text_c(s, "YOU WON" if won else "YOU LOST", 270, 112)
             retro.text_c(s, ogs.format_outcome(self.winner_id == self.black_id,
-                                               self.outcome), 160, 116)
-            retro.text_c(s, "A: back to games", 160, 134, PAL["text_dim"])
+                                               self.outcome), 270, 132)
+            retro.text_c(s, "A games", 270, 156, PAL["text_dim"])
         elif self.phase == "stone removal" and not self.busy:
-            retro.dialog_box(s, (40, 84, 240, 68))
-            retro.text_c(s, "COUNTING", 160, 98)
-            retro.text_c(s, "A: accept result", 160, 116)
-            retro.text_c(s, "B: back to games", 160, 134, PAL["text_dim"])
+            retro.dialog_box(s, (224, 96, 92, 92))
+            retro.text_c(s, "COUNTING", 270, 112)
+            retro.text_c(s, "A accept", 270, 132)
+            retro.text_c(s, "B games", 270, 156, PAL["text_dim"])
         poll = 180 if self.speed in ("live", "blitz") else 1800
         if (self.gid and self.t and self.t % poll == 0 and not self._loading and
                 (self.phase == "stone removal" or (playing and not self.my_turn))):
