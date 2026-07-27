@@ -274,6 +274,7 @@ def cancel_challenge(cid):
     r = requests.delete(f"{BASE}/challenges/{cid}/", headers=h, timeout=15)
     if r.status_code not in (200, 204):
         r.raise_for_status()
+    _chall_store([c for c in _chall_store() if c.get("id") != cid])
     return True
 
 
