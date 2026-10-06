@@ -268,6 +268,10 @@ class GamesScene:
         self.t += 1
 
 
+BOARD_SIZES = (9, 13)
+new_size = 9      # bordmaat voor nieuwe challenges; links/rechts in NEW GAME
+
+
 class NewGameScene:
     """Nieuwe pot: daily, live (open challenge) of een bot van de bloemenladder."""
     OPTIONS = (("daily", "3d + 1d per move"),
@@ -290,10 +294,14 @@ class NewGameScene:
             return self.back()
         if self.busy:
             return self
+        global new_size
         if ev.key == pygame.K_DOWN:
             self.sel = min(len(self.OPTIONS) - 1, self.sel + 1)
         elif ev.key == pygame.K_UP:
             self.sel = max(0, self.sel - 1)
+        elif ev.key in (pygame.K_LEFT, pygame.K_RIGHT):
+            i = BOARD_SIZES.index(new_size) + (1 if ev.key == pygame.K_RIGHT else -1)
+            new_size = BOARD_SIZES[i % len(BOARD_SIZES)]
         elif ev.key in A_KEYS:
             if self.OPTIONS[self.sel][0] == "bots":
                 return BotScene()
@@ -304,7 +312,7 @@ class NewGameScene:
 
     def _create(self):
         try:
-            ogs.create_challenge(self.OPTIONS[self.sel][0])
+            ogs.create_challenge(self.OPTIONS[self.sel][0], new_size)
             self.msg = "Posted. Any key: games"
             self.done = True
         except Exception:
@@ -314,7 +322,7 @@ class NewGameScene:
     def draw(self, s):
         s.fill(PAL["screen"])
         retro.text_c(s, "NEW GAME", W // 2, 14, PAL["box"])
-        retro.text_c(s, "9x9 - ranked - japanese", W // 2, 34, PAL["text_dim"])
+        retro.text_c(s, f"< {new_size}x{new_size} > ranked - japanese", W // 2, 34, PAL["text_dim"])
         for i, (name, desc) in enumerate(self.OPTIONS):
             y = 60 + i * 44
             retro.dialog_box(s, (60, y, 200, 38))
@@ -371,7 +379,7 @@ class BotScene:
     def _challenge(self):
         try:
             name, pid = self.flowers[self.sel]
-            ogs.challenge_player(pid, "daily")
+            ogs.challenge_player(pid, "daily", new_size)
             self.msg = "Starting..."
             known = {g["id"] for g in ogs.my_games() if g["opp"] != name}
             for _ in range(20):     # bot accepteert doorgaans binnen seconden
@@ -389,6 +397,7 @@ class BotScene:
     def draw(self, s):
         s.fill(PAL["screen"])
         retro.text_c(s, "FLOWER LADDER", W // 2, 14, PAL["box"])
+        retro.text_c(s, f"{new_size}x{new_size}", W // 2, 28, PAL["text_dim"])
         for i, (name, _) in enumerate(self.flowers):
             y = 44 + i * 26
             retro.dialog_box(s, (64, y, 192, 22))
@@ -531,6 +540,7 @@ class GameScene:
             # alles in één publicatie; draw neemt hem op de main thread over
             self._snap = dict(
                 size=size, board=board, caps=(cb, cw), last=last, nmoves=len(moves),
+                **({"cx": size // 2, "cy": size // 2} if size != self.size else {}),
                 names=(pl.get("black", {}).get("username", "?"),
                        pl.get("white", {}).get("username", "?")),
                 komi=float(gd.get("komi", 6.5)), rules=gd.get("rules", "japanese"),
@@ -668,7 +678,7 @@ class GameScene:
         """Statisch bord (hout, raster, hoshi) 1x gerenderd per bordmaat."""
         if self._bg is None or self._bg_size != self.size:
             n = self.size
-            c = min(23, 184 // max(1, n - 1))
+            c = min(23, 192 // max(1, n - 1))
             span = c * (n - 1)
             o = (212 - span) // 2
             bg = pygame.Surface((212, 212))
@@ -677,8 +687,12 @@ class GameScene:
             for i in range(n):
                 pygame.draw.line(bg, PAL["line"], (o, o + i * c), (o + span, o + i * c))
                 pygame.draw.line(bg, PAL["line"], (o + i * c, o), (o + i * c, o + span))
-            if n == 9:
-                for hx, hy in ((2, 2), (6, 2), (4, 4), (2, 6), (6, 6)):
+            e = 2 if n < 13 else 3
+            hoshi = [(a, b) for a in (e, n - 1 - e) for b in (e, n - 1 - e)] + [(n // 2, n // 2)]
+            if n == 19:
+                hoshi += [(3, 9), (15, 9), (9, 3), (9, 15)]
+            if n in (9, 13, 19):
+                for hx, hy in hoshi:
                     pygame.draw.rect(bg, PAL["line"], (o + hx * c - 1, o + hy * c - 1, 3, 3))
             self._bg, self._bg_size = bg, n
         return self._bg
@@ -690,7 +704,7 @@ class GameScene:
         s.fill(PAL["screen"])
         s.blit(self._board_bg(), (4, 14))
         n = self.size
-        c = min(23, 184 // max(1, n - 1))
+        c = min(23, 192 // max(1, n - 1))
         span = c * (n - 1)
         ox = 4 + (212 - span) // 2
         oy = 14 + (212 - span) // 2
@@ -712,11 +726,12 @@ class GameScene:
                 retro.stone(s, px, py, r, "B" if self.my_color == 1 else "W")
             else:
                 a = PAL["accent"]
+                d, k = c // 2 - 1, (4 if c >= 20 else 3)
                 for sx in (-1, 1):
                     for sy in (-1, 1):
-                        x0, y0 = px + sx * 10, py + sy * 10
-                        pygame.draw.line(s, a, (x0, y0), (x0 - sx * 4, y0))
-                        pygame.draw.line(s, a, (x0, y0), (x0, y0 - sy * 4))
+                        x0, y0 = px + sx * d, py + sy * d
+                        pygame.draw.line(s, a, (x0, y0), (x0 - sx * k, y0))
+                        pygame.draw.line(s, a, (x0, y0), (x0, y0 - sy * k))
         # plates: zwart boven, wit onder — Go-conventie, direct onder elkaar
         playing = self.phase == "play"
         self._plate(s, 14, 1, self.names[0], self.caps[0], playing and self.turn_color == 1)
