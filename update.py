@@ -24,7 +24,14 @@ def _headers():
 
 
 def main():
+    import time
     import requests
+    # Na slaap/boot staat de klok soms nog vóór 2025 tot NTP synct; dan faalt
+    # de SSL-check ("certificate is not yet valid"). Wacht daar max 10s op.
+    for _ in range(10):
+        if time.time() > 1735689600:
+            break
+        time.sleep(1)
     h = _headers()
     r = requests.get(f"https://api.github.com/repos/{REPO}/commits/master",
                      headers=h, timeout=8)
