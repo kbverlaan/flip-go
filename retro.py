@@ -68,14 +68,37 @@ def fmt_time(sec):
     return f"{sec // 60}:{sec % 60:02d}"
 
 
+_STONES = {}
+
+
+def _stone_sprite(r, color):
+    """Ronde pixel-steen, diameter 2r+1: exact gecentreerd op het snijpunt."""
+    key = (r, color)
+    if key not in _STONES:
+        n = 2 * r + 1
+        sp = pygame.Surface((n, n))
+        sp.fill((255, 0, 255))
+        sp.set_colorkey((255, 0, 255))
+        inside = lambda x, y: abs(x) <= r and abs(y) <= r and x * x + y * y <= r * r + r
+        for y in range(-r, r + 1):
+            for x in range(-r, r + 1):
+                if not inside(x, y):
+                    continue
+                rim = not all(inside(x + a, y + b) for a, b in ((1, 0), (-1, 0), (0, 1), (0, -1)))
+                if color == "B":
+                    c = (16, 16, 20) if rim else PAL["black"]
+                elif not inside(x + 1, y + 1):
+                    c = (120, 120, 114)          # schaduw rechtsonder
+                else:
+                    c = PAL["white_sh"] if rim else PAL["white"]
+                sp.set_at((x + r, y + r), c)
+        if color == "B":
+            sp.set_at((r - r // 2, r - r // 2), PAL["black_hi"])
+            sp.set_at((r - r // 2 + 1, r - r // 2), PAL["black_hi"])
+        _STONES[key] = sp
+    return _STONES[key]
+
+
 def stone(surf, px, py, r, color):
     """Pixel-steen met 1px outline en glimlicht."""
-    if color == "B":
-        pygame.draw.circle(surf, PAL["black"], (px, py), r)
-        pygame.draw.circle(surf, (16, 16, 20), (px, py), r, 1)
-        surf.set_at((px - r // 2, py - r // 2), PAL["black_hi"])
-        surf.set_at((px - r // 2 + 1, py - r // 2), PAL["black_hi"])
-    else:
-        pygame.draw.circle(surf, PAL["white"], (px, py), r)
-        pygame.draw.circle(surf, PAL["white_sh"], (px, py), r, 1)
-        pygame.draw.circle(surf, (120, 120, 114), (px + 1, py + 1), r, 1)
+    surf.blit(_stone_sprite(r, color), (px - r, py - r))
