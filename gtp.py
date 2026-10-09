@@ -12,8 +12,8 @@ LETTERS = "ABCDEFGHJKLMNOPQRST"
 
 # Offline tegenstanders: (label, kind, arg). gnugo-arg = level, katago-arg = human-profiel.
 # Bergnamen = MiniGo-bergenladder (humanlike-net speelt als een mens van die rank).
+# Laagste geldige profiel is 20k: een onbekend profiel (preaz_25k) laat KataGo crashen.
 BOTS = (
-    ("Vaalserberg", "katago", "preaz_25k"),
     ("Zugspitze", "katago", "preaz_20k"),
     ("Fuji", "katago", "preaz_18k"),
     ("Mont Blanc", "katago", "preaz_15k"),
@@ -155,7 +155,7 @@ def preload():
         global _warm
         with _warm_lock:
             if _warm is None or _warm.p.poll() is not None:
-                _warm = Engine("katago", BOTS[1][2])
+                _warm = Engine("katago", BOTS[0][2])
                 _warm.cmd("name")       # blokkeert tot het net geladen is
     threading.Thread(target=go, daemon=True).start()
 
