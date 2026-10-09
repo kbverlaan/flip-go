@@ -166,11 +166,11 @@ def my_games():
     return out
 
 
-def my_history(n=10):
-    """Laatste afgeronde potten. -> {id, opp, won, result} nieuwste eerst."""
+def my_history(n=10, page=1):
+    """Afgeronde potten, nieuwste eerst. -> {id, opp, won, result, size, ended}"""
     mid = me().get("id")
     out = []
-    for g in api(f"players/{mid}/games", ordering="-ended", page_size=n).get("results", []):
+    for g in api(f"players/{mid}/games", ordering="-ended", page_size=n, page=page).get("results", []):
         if not g.get("ended"):
             continue
         black = (g.get("players") or {}).get("black", {})
@@ -181,6 +181,7 @@ def my_history(n=10):
             "opp": (white if i_black else black).get("username", "?"),
             "won": bool(g.get("white_lost") if i_black else g.get("black_lost")),
             "result": format_outcome(g.get("white_lost"), g.get("outcome", "")),
+            "size": g.get("width"), "ended": g.get("ended"),
         })
     return out
 

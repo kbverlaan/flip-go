@@ -22,6 +22,7 @@ import retro
 from retro import PAL, W, H
 
 import goban
+import analyse
 import gtp
 import json
 import ogs
@@ -489,53 +490,167 @@ class BotScene:
             retro.text_c(s, self.msg, W // 2, 218, PAL["text_dim"])
 
 
+class PastGame:
+    """Afgelopen pot (OGS of offline) als 'game' voor GameReviewScene/WalkScene. De review komt
+    uit conf/reviews/ of, als die er nog niet is, van de achtergrond-analyse (analyse.worker)."""
+
+    def __init__(self, row, back):
+        self.row, self.back = row, back
+        self.key = row["key"]
+        self.gid = row.get("id")
+        self.size = row.get("size") or 9
+        self.bot = (row["opp"],)
+        self._r = analyse.load(self.key)
+        self._sync()
+
+    def _sync(self):
+        r = self._r
+        if r:
+            self.moves = [tuple(m) for m in r["game_moves"]]
+            self.size, self.human = r["size"], r.get("human", 1)
+            self.result = (self.human if r.get("won") else 3 - self.human,)
+        else:
+            self.moves, self.human = [], 1
+            self.result = (1 if self.row.get("won") else 2,)
+
+    @property
+    def review(self):
+        if self._r is None and self.gid is not None:
+            st = analyse.worker.status.get(self.gid)
+            if st == "done":
+                self._r = analyse.load(self.key)
+                self._sync()
+            elif isinstance(st, str) and st != "queued":
+                return {"error": st}
+        return self._r
+
+    @property
+    def analysing(self):
+        st = analyse.worker.status.get(self.gid) if self._r is None else None
+        return st if isinstance(st, float) else (0.0 if st == "queued" else None)
+
+    def _leave(self):
+        return self.back
+
+
 class HistoryScene:
-    """Laatste afgeronde potten: uitslag + tegenstander. A = terugkijken."""
+    """Alle afgeronde potten (OGS + offline met review), nieuwste eerst. A = review (analyseert
+    zo nodig eerst), bovenaan ANALYSE ALL, START = stats. Analyses lopen door op de achtergrond."""
+    PAGE = 20
 
     def __init__(self):
-        self.rows = None
-        self.sel = 0
+        self.ogs, self.rows, self.sel, self.page, self.more = None, None, 0, 0, True
         self.t0 = time.monotonic()
-        threading.Thread(target=self._load, daemon=True).start()
+        self._fetching = False
+        self._fetch()
 
-    def _load(self):
-        try:
-            self.rows = ogs.my_history()
-        except Exception:
-            self.rows = []
+    def _fetch(self):
+        if self._fetching or not self.more:
+            return
+        self._fetching = True
+        def go():
+            try:
+                got = ogs.my_history(self.PAGE, self.page + 1)
+                self.page += 1
+                self.more = len(got) == self.PAGE
+            except Exception as e:
+                print("history:", e)
+                got, self.more = [], False
+            for g in got:
+                g.update(key=f"ogs-{g['id']}", src="ogs", ts=analyse._iso_ts(g.get("ended")))
+            self.ogs = (self.ogs or []) + got
+            self._merge()
+            self._fetching = False
+        threading.Thread(target=go, daemon=True).start()
+
+    def _merge(self):
+        games = (self.ogs or []) + analyse.local_games()
+        games.sort(key=lambda g: -(g.get("ts") or 0))
+        self.rows = [{"key": "all"}] + games
+
+    def _todo(self):
+        done = analyse.done_keys()
+        return [g["id"] for g in self.rows or [] if g.get("src") == "ogs" and g["key"] not in done
+                and g.get("size") in (9, 13, 19)]
 
     def handle(self, ev):
         if ev.type != pygame.KEYDOWN:
             return self
         if ev.key in B_KEYS:
             return GamesScene()
+        if ev.key == pygame.K_s:
+            return StatsScene(self)
         rows = self.rows or []
         if ev.key == pygame.K_DOWN and rows:
             self.sel = min(len(rows) - 1, self.sel + 1)
+            if self.sel >= len(rows) - 3:
+                self._fetch()                  # verder terug in de tijd
         elif ev.key == pygame.K_UP and rows:
             self.sel = max(0, self.sel - 1)
         elif ev.key in A_KEYS and rows:
-            return GameScene(rows[self.sel]["id"], back=HistoryScene)
+            row = rows[self.sel]
+            if row["key"] == "all":
+                analyse.worker.add(self._todo())
+                return self
+            if row["key"] not in analyse.done_keys() and row.get("src") == "ogs":
+                st = analyse.worker.status.get(row["id"])
+                if not isinstance(st, float):  # vooraan in de rij (lopende analyse niet onderbreken)
+                    analyse.worker.queue[:] = [g for g in analyse.worker.queue if g != row["id"]]
+                    analyse.worker.status.pop(row["id"], None)
+                    analyse.worker.queue.insert(0, row["id"])
+                    analyse.worker.status[row["id"]] = "queued"
+                    analyse.worker.add([])
+            return GameReviewScene(PastGame(row, self))
         return self
 
     def draw(self, s):
         s.fill(PAL["screen"])
-        retro.text_c(s, "HISTORY", W // 2, 14, PAL["box"])
+        retro.text_c(s, "HISTORY", W // 2, 6, PAL["box"])
         if self.rows is None:
             retro.text_c(s, "loading" + "." * (int((time.monotonic() - self.t0) * 3) % 4), W // 2, 110, PAL["text_dim"])
-        elif not self.rows:
-            retro.text_c(s, "No finished games.", W // 2, 110, PAL["text_dim"])
-        else:
-            off = max(0, min(self.sel - 5, len(self.rows) - 6))
-            for i, r in enumerate(self.rows[off:off + 6]):
-                y = 44 + i * 30
-                retro.dialog_box(s, (16, y, 288, 26))
-                if i + off == self.sel:
-                    arrow(s, 24, y + 9)
-                retro.text(s, "won " if r["won"] else "lost", 36, y + 9,
-                           PAL["green"] if r["won"] else PAL["accent"])
-                retro.text(s, f"vs {r['opp'][:15]}", 76, y + 9)
-                retro.text_r(s, r["result"], 296, y + 9, PAL["text_dim"])
+            return
+        if time.monotonic() - getattr(self, "_seen", 0) > 1:      # bestanden 1x/s lezen, niet per frame
+            self._seen = time.monotonic()
+            self._done = analyse.done_keys()
+            self._lpm = {r.get("key"): r["loss_per_move"] for r in review.history(REVIEWS, n=100000)}
+        done, lpm = self._done, self._lpm
+        off = max(0, min(self.sel - 3, len(self.rows) - 7))
+        for i, r in enumerate(self.rows[off:off + 7]):
+            y = 22 + i * 28
+            retro.dialog_box(s, (8, y, 304, 24))
+            if i + off == self.sel:
+                arrow(s, 14, y + 8)
+            if r["key"] == "all":
+                todo = len(self._todo())
+                w = analyse.worker
+                retro.text(s, "ANALYSE ALL", 28, y + 8)
+                if w.busy():
+                    p = w.status.get(w.cur)
+                    retro.text_r(s, f"{len(w.queue) + (w.cur is not None)} to go", 304, y + 8, PAL["text_dim"])
+                    if isinstance(p, float):
+                        bar(s, 150, y + 8, 70, p)
+                else:
+                    retro.text_r(s, f"{todo} new" if todo else "all done", 304, y + 8, PAL["text_dim"])
+                continue
+            retro.text(s, "won " if r.get("won") else "lost", 28, y + 8,
+                       PAL["green"] if r.get("won") else PAL["accent"])
+            retro.text(s, f"{r['opp'][:11]}", 68, y + 8)
+            retro.text(s, f"{r.get('size') or '?'}" + ("" if r.get("src") == "ogs" else "*"), 166, y + 8,
+                       PAL["text_dim"])
+            st = analyse.worker.status.get(r.get("id")) if r.get("src") == "ogs" else None
+            if r["key"] in done:
+                v = lpm.get(r["key"])
+                retro.text_r(s, f"{v:.1f}/mv" if v is not None else "ok", 304, y + 8)
+            elif isinstance(st, float):
+                bar(s, 234, y + 8, 70, st)
+            elif st == "queued":
+                retro.text_r(s, "queued", 304, y + 8, PAL["text_dim"])
+            elif st:
+                retro.text_r(s, st[:9], 304, y + 8, PAL["text_dim"])
+            else:
+                retro.text_r(s, r.get("result", "")[:9], 304, y + 8, PAL["text_dim"])
+        retro.text(s, "A review  START stats", 4, 228, PAL["text_dim"])
+        retro.text_r(s, "* offline", 316, 228, PAL["text_dim"])
 
 
 class GameScene:
@@ -940,6 +1055,7 @@ class OfflineGameScene(GameScene):
         self.eng = None
         self.busy = True
         self.msg = "Loading..."          # laadbalk eronder (gtp.load_progress)
+        analyse.worker.stop()            # oude potten analyseren kost de bot CPU
         threading.Thread(target=self._start, daemon=True).start()
 
     def _start(self):
@@ -1006,9 +1122,10 @@ class OfflineGameScene(GameScene):
             if not r:
                 self.review = {"error": "game too short"}
                 return
+            ts = int(time.time())
             r.update(size=self.size, bot=self.bot[0], won=self.result[0] == 1, human=1,
-                     date=time.strftime("%Y-%m-%d"))
-            review.save(REVIEWS, r)
+                     date=time.strftime("%Y-%m-%d"), src="off", ts=ts)
+            analyse.store(f"off-{ts}", r, [list(m) for m in moves])
             self.review = r
         except Exception as ex:
             print("review:", ex)
@@ -1144,7 +1261,9 @@ class GameReviewScene:
     def draw(self, s):
         s.fill(PAL["screen"])
         g, r = self.game, self.game.review
-        res = "won" if g.result and g.result[0] == 1 else "lost"
+        human = getattr(g, "human", 1)
+        opp = "opp" if isinstance(g, PastGame) and g.row.get("src") == "ogs" else "bot"
+        res = "won" if g.result and g.result[0] == human else "lost"
         retro.text_c(s, "REVIEW", W // 2, 6, PAL["box"])
         retro.text_c(s, f"vs {g.bot[0]}  {g.size}x{g.size}  {res}", W // 2, 20, PAL["text_dim"])
         if r is None or r.get("error"):
@@ -1160,21 +1279,22 @@ class GameReviewScene:
             x0, x1, ym, hh = 14, 306, 61, 24
             cap = max(10.0, min(60.0, max(abs(v) for v in L)))
             pygame.draw.line(s, PAL["box_dk"], (x0, ym), (x1, ym))
-            pts = [(x0 + int(i * (x1 - x0) / (len(L) - 1)), ym - int(max(-cap, min(cap, v)) / cap * hh))
+            sg = 1 if human == 1 else -1        # leads zijn zwart-perspectief
+            pts = [(x0 + int(i * (x1 - x0) / (len(L) - 1)), ym - int(max(-cap, min(cap, sg * v)) / cap * hh))
                    for i, v in enumerate(L)]
             pygame.draw.lines(s, PAL["text"], False, pts, 1)
             for row in r["rows"]:
-                if row["col"] == 1 and row["cls"] in ("mistake", "blunder") and row["t"] < len(pts):
+                if row["col"] == human and row["cls"] in ("mistake", "blunder") and row["t"] < len(pts):
                     px, py = pts[row["t"]]
                     pygame.draw.rect(s, PAL[CLS_COL[row["cls"]]], (px - 1, py - 1, 3, 3))
             retro.text(s, "you ahead", 14, 35, PAL["text_dim"])
-            retro.text(s, "bot ahead", 14, 79, PAL["text_dim"])
+            retro.text(s, f"{opp} ahead", 14, 79, PAL["text_dim"])
             retro.text_r(s, f"move {len(L) - 1}", 306, 79, PAL["text_dim"])
         # zetklassen jij | bot
         retro.dialog_box(s, (8, 94, 150, 96))
         retro.text(s, "MOVES", 14, 100)
         retro.text_r(s, "you", 114, 100, PAL["text_dim"])
-        retro.text_r(s, "bot", 152, 100, PAL["text_dim"])
+        retro.text_r(s, opp, 152, 100, PAL["text_dim"])
         for i, (k, lab, sym, _) in enumerate(review.CLASSES):
             y = 116 + i * 14
             col = PAL["text"] if k == "good" else PAL[CLS_COL[k]]
@@ -1225,8 +1345,9 @@ class WalkScene:
         return out
 
     def _bad(self):
+        h = self.r.get("human", 1)
         return sorted(t for t, row in self.rows.items()
-                      if row["col"] == 1 and row["cls"] in ("inacc", "mistake", "blunder"))
+                      if row["col"] == h and row["cls"] in ("inacc", "mistake", "blunder"))
 
     def handle(self, ev):
         if ev.type != pygame.KEYDOWN:
@@ -1272,7 +1393,9 @@ class WalkScene:
         # zijpaneel
         retro.dialog_box(s, (224, 14, 92, 34))
         retro.text(s, f"#{t + 1} {_coord(played, n)}", 228, 20)
-        retro.text(s, ("you" if col_me == "B" else "bot") + f"  {t + 1}/{self.T}", 228, 34, PAL["text_dim"])
+        mine = (t % 2 == 0) == (self.r.get("human", 1) == 1)
+        other = "opp" if self.r.get("src") == "ogs" else "bot"
+        retro.text(s, ("you" if mine else other) + f"  {t + 1}/{self.T}", 228, 34, PAL["text_dim"])
         retro.dialog_box(s, (224, 52, 92, 50))
         if row:
             lab = next(l for k, l, _, _ in review.CLASSES if k == cls)
@@ -1313,9 +1436,14 @@ class StatsScene:
     """Hoog-over per bordmaat (laatste 20 potten): trend verlies/zet, per fase, fouten per pot,
     meest gemaakte typen blunders en mistakes."""
 
+    SRC = ((None, "all"), ("ogs", "OGS"), ("off", "offline"))
+
     def __init__(self, parent, size=None):
         self.parent = parent
-        self.size = size if size in BOARD_SIZES else new_size
+        have = {r.get("size") for r in review.history(REVIEWS, n=100000)}
+        self.sizes = tuple(sorted(have | set(BOARD_SIZES)))
+        self.size = size if size in self.sizes else new_size
+        self.src = 0
 
     def handle(self, ev):
         if ev.type != pygame.KEYDOWN:
@@ -1323,15 +1451,18 @@ class StatsScene:
         if ev.key in B_KEYS or ev.key == pygame.K_s:
             return self.parent
         if ev.key in (pygame.K_LEFT, pygame.K_RIGHT):
-            i = BOARD_SIZES.index(self.size) + (1 if ev.key == pygame.K_RIGHT else -1)
-            self.size = BOARD_SIZES[i % len(BOARD_SIZES)]
+            i = self.sizes.index(self.size) + (1 if ev.key == pygame.K_RIGHT else -1)
+            self.size = self.sizes[i % len(self.sizes)]
+        elif ev.key in (pygame.K_UP, pygame.K_DOWN):
+            self.src = (self.src + (1 if ev.key == pygame.K_DOWN else -1)) % len(self.SRC)
         return self
 
     def draw(self, s):
         s.fill(PAL["screen"])
-        h = review.history(REVIEWS, self.size, 20)
+        src, lab = self.SRC[self.src]
+        h = review.history(REVIEWS, self.size, 20, src)
         retro.text_c(s, "STATS", W // 2, 6, PAL["box"])
-        retro.text_c(s, f"< {self.size}x{self.size} >  last {len(h)} games", W // 2, 20, PAL["text_dim"])
+        retro.text_c(s, f"< {self.size}x{self.size} > ^ {lab} v  {len(h)} games", W // 2, 20, PAL["text_dim"])
         if not h:
             retro.text_c(s, "no reviews yet", W // 2, 110, PAL["text_dim"])
             retro.text(s, "B back", 4, 228, PAL["text_dim"])
@@ -1390,9 +1521,9 @@ class StatsScene:
                 retro.text_r(s, f"x{v}", x + 142, 186 + i * 14, PAL["text_dim"])
             if not tot:
                 retro.text(s, "-", x, 186, PAL["text_dim"])
-        retro.text(s, "<> board", 4, 228, PAL["text_dim"])
-        pygame.draw.rect(s, PAL["green"], (118, 230, 3, 3))
-        retro.text(s, "won", 126, 228, PAL["text_dim"])
+        retro.text(s, "<> board ^v src", 4, 228, PAL["text_dim"])
+        pygame.draw.rect(s, PAL["green"], (142, 230, 3, 3))
+        retro.text(s, "won", 150, 228, PAL["text_dim"])
         retro.text_r(s, "B back", 316, 228, PAL["text_dim"])
 
 

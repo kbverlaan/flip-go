@@ -5,8 +5,10 @@ evals: {beurt t: {"lead": scoreLead (zwart-perspectief) van de stelling na t zet
 Verlies van zet t = score vóór - score na, vanuit de speler aan zet. Categorieën volgen de
 MiniGo-taxonomie (app.py _classify_mistake) plus 'Passed'. Puur Python: testbaar op de Mac.
 """
+import calendar
 import json
 import os
+import time
 
 import goban
 
@@ -182,19 +184,31 @@ def save(path, entry):
         f.write(json.dumps(slim, separators=(",", ":")) + "\n")
 
 
-def history(path, size=None, n=10):
-    """Laatste n reviews; kapotte regels (bv. half geschreven) en oude formaten overslaan."""
-    rows = []
+def history(path, size=None, n=10, src=None):
+    """Laatste n reviews op datum (oude OGS-potten komen op hun eigen plek); kapotte regels
+    en oude formaten overslaan; opnieuw geanalyseerde potten één keer. src: 'ogs'|'off'|None."""
+    rows = {}
     try:
-        for line in open(path):
+        for i, line in enumerate(open(path)):
             try:
                 r = json.loads(line)
             except ValueError:
                 continue
             if r.get("v") == VERSION:
-                rows.append(r)
+                rows[r.get("key") or i] = r
     except OSError:
         return []
+    rows = list(rows.values())
     if size:
         rows = [r for r in rows if r.get("size") == size]
+    if src:
+        rows = [r for r in rows if r.get("src", "off") == src]
+    rows.sort(key=lambda r: r.get("ts") or _date_ts(r.get("date")))
     return rows[-n:]
+
+
+def _date_ts(d):
+    try:
+        return calendar.timegm(time.strptime(d, "%Y-%m-%d"))
+    except (TypeError, ValueError):
+        return 0
