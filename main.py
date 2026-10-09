@@ -963,12 +963,13 @@ class OfflineGameScene(GameScene):
             return
         try:
             moves, gtp_moves = list(self.moves), list(e.moves)
-            ev = e.fill_missing()                 # momentopname van déze pot
+            ev = e.fill_missing()                 # momentopname van déze pot (8 visits, uniform)
             r = review.compute(self.size, moves, ev, human=1)
-            if r:
+            if r:                                 # eigen fouten nauwkeuriger, in een APARTE dict
+                evd = {}
                 for t in review.recheck(r["rows"]):
-                    e.deep(t, ev=ev, moves=gtp_moves)
-                r = review.compute(self.size, moves, ev, human=1)
+                    e.deep(t, ev=evd, moves=gtp_moves)
+                r = review.compute(self.size, moves, ev, human=1, deep=evd)
             if not r:
                 self.review = {"error": "game too short"}
                 return
@@ -1132,14 +1133,16 @@ class GameReviewScene:
                     px, py = pts[row["t"]]
                     pygame.draw.rect(s, PAL[CLS_COL[row["cls"]]], (px - 1, py - 1, 3, 3))
             retro.text(s, "you ahead", 14, 35, PAL["text_dim"])
+            retro.text(s, "bot ahead", 14, 79, PAL["text_dim"])
+            retro.text_r(s, f"move {len(L) - 1}", 306, 79, PAL["text_dim"])
         # zetklassen jij | bot
         retro.dialog_box(s, (8, 94, 150, 96))
-        retro.text(s, "MOVES", 14, 100)
+        retro.text(s, "ERRORS", 14, 100)
         retro.text_r(s, "you", 114, 100, PAL["text_dim"])
         retro.text_r(s, "bot", 152, 100, PAL["text_dim"])
-        for i, (k, lab, sym, _) in enumerate(review.CLASSES):
-            y = 114 + i * 14
-            retro.text(s, (lab[:7] + " " + sym).strip(), 14, y, PAL[CLS_COL[k]])
+        for i, (k, lab, sym, _) in enumerate(review.CLASSES[2:]):     # best/good = ruis bij 8 visits
+            y = 120 + i * 20
+            retro.text(s, (("Inacc" if k == "inacc" else lab) + " " + sym).strip(), 14, y, PAL[CLS_COL[k]])
             retro.text_r(s, str(r["me"].get(k, 0)), 114, y)
             retro.text_r(s, str(r["opp"].get(k, 0)), 152, y, PAL["text_dim"])
         # verlies/zet + fouttypes
@@ -1218,8 +1221,7 @@ class WalkScene:
         played = None if x < 0 else (x, y)
         col_me = "B" if t % 2 == 0 else "W"
         col_op = "W" if col_me == "B" else "B"
-        prev = next(((px, py) for px, py in reversed(g.moves[:t]) if px >= 0), None)
-        marks = [("last", prev, None)]
+        marks = []
         cls = row["cls"] if row else None
         if self.better and row and row["answer"]:
             line = MomentScene_line(row)
@@ -1233,9 +1235,8 @@ class WalkScene:
         _draw_board(s, n, self.boards[t], marks)
         # zijpaneel
         retro.dialog_box(s, (224, 14, 92, 34))
-        who = "you" if col_me == "B" else g.bot[0][:8]
         retro.text(s, f"#{t + 1} {_coord(played, n)}", 228, 20)
-        retro.text(s, who, 228, 34, PAL["text_dim"])
+        retro.text(s, ("you" if col_me == "B" else "bot") + f"  {t + 1}/{self.T}", 228, 34, PAL["text_dim"])
         retro.dialog_box(s, (224, 52, 92, 50))
         if row:
             lab = next(l for k, l, _, _ in review.CLASSES if k == cls)
@@ -1247,17 +1248,17 @@ class WalkScene:
                 retro.text(s, f"best {_coord(row['answer'], n)}", 228, 86, PAL["green"])
         else:
             retro.text(s, "no eval", 228, 58, PAL["text_dim"])
-        retro.dialog_box(s, (224, 106, 92, 40))
         if row and row.get("cat"):
             cat = review.CATS.get(row["cat"], (row["cat"], "", ""))
+            retro.dialog_box(s, (224, 106, 92, 52))
             retro.text(s, cat[0], 228, 112)
             retro.text(s, cat[1], 228, 126, PAL["text_dim"])
-        retro.dialog_box(s, (224, 150, 92, 76))
-        retro.text(s, "<> move", 228, 156, PAL["text_dim"])
-        retro.text(s, "^v mistake", 228, 170, PAL["text_dim"])
-        retro.text(s, "A " + ("played" if self.better else "better"), 228, 184, PAL["text_dim"])
-        retro.text(s, "B back", 228, 198, PAL["text_dim"])
-        retro.text(s, f"{t + 1}/{self.T}", 228, 212, PAL["text_dim"])
+            retro.text(s, cat[2], 228, 140, PAL["text_dim"])
+        retro.dialog_box(s, (224, 162, 92, 64))
+        retro.text(s, "<> move", 228, 168, PAL["text_dim"])
+        retro.text(s, "^v mistake", 228, 182, PAL["text_dim"])
+        retro.text(s, "A " + ("played" if self.better else "better"), 228, 196, PAL["text_dim"])
+        retro.text(s, "B back", 228, 210, PAL["text_dim"])
 
 
 def MomentScene_line(row):
@@ -1319,6 +1320,8 @@ class StatsScene:
         # 2. per fase: laatste 5 vs de 5 daarvoor
         retro.dialog_box(s, (8, 96, 150, 64))
         retro.text(s, "BY PHASE", 14, 102)
+        if len(h) >= 10:
+            retro.text_r(s, "vs prev", 152, 102, PAL["text_dim"])
         for i, (ph, lab) in enumerate((("open", "open"), ("mid", "mid"), ("end", "end"))):
             series = [r["phases"][ph] for r in h if r.get("phases", {}).get(ph) is not None]
             now, before = mean(series[-5:]), mean(series[-10:-5])
@@ -1326,17 +1329,16 @@ class StatsScene:
             retro.text(s, lab, 14, y)
             if now is not None:
                 retro.text_r(s, f"{now:.1f}", 96, y)
-                if before is not None:
+                if before is not None and len(h) >= 10:
                     d = now - before
-                    retro.text_r(s, f"{d:+.1f}", 152, y, PAL["green"] if d < -0.2 else
-                                 PAL["accent"] if d > 0.2 else PAL["text_dim"])
+                    retro.text_r(s, f"{d:+.1f}", 152, y, PAL["accent"] if d > 0.2 else PAL["text_dim"])
         # 3. fouten per pot
         retro.dialog_box(s, (162, 96, 150, 64))
         retro.text(s, "PER GAME", 168, 102)
         for i, k in enumerate(("blunder", "mistake", "inacc")):
             lab, sym = next((l, sy) for kk, l, sy, _ in review.CLASSES if kk == k)
             v = mean([r["me"].get(k, 0) for r in h])
-            retro.text(s, (lab[:7] + " " + sym).strip(), 168, 116 + i * 14, PAL[CLS_COL[k]])
+            retro.text(s, (lab[:7 if k != "inacc" else 5] + " " + sym).strip(), 168, 116 + i * 14, PAL[CLS_COL[k]])
             retro.text_r(s, f"{v:.1f}", 306, 116 + i * 14)
         # 4. meest gemaakte typen
         retro.dialog_box(s, (8, 164, 304, 54))
@@ -1353,6 +1355,8 @@ class StatsScene:
             if not tot:
                 retro.text(s, "-", x, 186, PAL["text_dim"])
         retro.text(s, "<> board", 4, 228, PAL["text_dim"])
+        pygame.draw.rect(s, PAL["green"], (118, 230, 3, 3))
+        retro.text(s, "won", 126, 228, PAL["text_dim"])
         retro.text_r(s, "B back", 316, 228, PAL["text_dim"])
 
 

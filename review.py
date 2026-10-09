@@ -116,18 +116,22 @@ def classify(board, n, played, answer, lost, prev, col):
         return "bigpoint"
     return "local"
 
-def compute(size, moves, evals, human=1):
+def compute(size, moves, evals, human=1, deep=None):
     """-> dict met per-zet-analyse (beide kleuren) + samenvatting, of None bij te weinig data.
-    evals[t] = stand vóór zet t: {"lead": scoreLead zwart, "best": GTP, "pv": [...]}"""
+    evals[t] = stand vóór zet t (8 visits, uniform): {"lead": scoreLead zwart, "best": GTP, "pv": [...]}
+    deep[t] = zelfde, nauwkeuriger (30 visits) voor opnieuw doorgerekende eigen fouten. Een verlies
+    vergelijkt altijd binnen één visits-niveau (anders ontstaat een zaagtand van schijnfouten)."""
+    deep = deep or {}
     board = [[0] * size for _ in range(size)]
     rows, prev = [], None
     for t, (x, y) in enumerate(moves):
         col = 1 if t % 2 == 0 else 2
         played = None if x < 0 else (x, y)
-        if t in evals and t + 1 in evals:
+        src = deep if (col == human and t in deep and t + 1 in deep) else evals
+        if t in src and t + 1 in src:
             sign = 1 if col == 1 else -1
-            lost = sign * (evals[t]["lead"] - evals[t + 1]["lead"])
-            answer = gtp_xy(evals[t].get("best"), size)
+            lost = sign * (src[t]["lead"] - src[t + 1]["lead"])
+            answer = gtp_xy(src[t].get("best"), size)
             is_best = played == answer
             if is_best:
                 lost = min(lost, 0.0)
@@ -140,7 +144,7 @@ def compute(size, moves, evals, human=1):
                     if cls in ("inacc", "mistake", "blunder") else None,
                     "phase": phase_of(t, board, size), "played": played, "answer": answer,
                     "reply": tuple(nxt) if nxt and nxt[0] >= 0 else None,
-                    "pv": [gtp_xy(m, size) for m in evals[t].get("pv") or []]})
+                    "pv": [gtp_xy(m, size) for m in src[t].get("pv") or []]})
         if played:
             goban.apply_move(board, x, y, col)
             prev = played
