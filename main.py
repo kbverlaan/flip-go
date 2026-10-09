@@ -180,8 +180,13 @@ class GamesScene:
     FOOTER = ("NEW GAME", "HISTORY")
 
     def _rows(self):
-        """-> lijst ('game'|'seek', data); footer staat er los onder"""
-        rows = [("game", g) for g in (self.games or [])]
+        """-> lijst ('offline'|'game'|'seek', data); footer staat er los onder"""
+        if not hasattr(self, "_offline"):
+            sv = load_offline()
+            bot = sv and next((b for b in gtp.BOTS if b[0] == sv.get("bot")), None)
+            self._offline = (sv, bot) if bot else None
+        rows = [("offline", self._offline)] if self._offline else []
+        rows += [("game", g) for g in (self.games or [])]
         rows += [("seek", c) for c in self.seeking]
         return rows
 
@@ -209,6 +214,9 @@ class GamesScene:
                     return HistoryScene()
                 return OfflineScene() if self.error else NewGameScene()
             kind, data = rows[self.sel]
+            if kind == "offline":
+                sv, bot = data
+                return OfflineGameScene(bot, sv["size"], sv["moves"])
             if kind == "game":
                 return GameScene(data["id"])
             if kind == "seek":
@@ -243,7 +251,10 @@ class GamesScene:
             retro.dialog_box(s, (16, y, 288, 26))
             if i + off == self.sel:
                 arrow(s, 24, y + 9)
-            if kind == "game":
+            if kind == "offline":
+                retro.text(s, f"vs {data[1][0]}", 36, y + 9)
+                retro.text_r(s, "offline", 296, y + 9, PAL["text_dim"])
+            elif kind == "game":
                 retro.text(s, f"vs {data['opp'][:19]}", 36, y + 9)
                 if data["my_turn"] and data.get("left"):
                     retro.text_r(s, retro.fmt_time(data["left"]), 296, y + 9)
