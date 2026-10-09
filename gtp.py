@@ -18,6 +18,7 @@ LETTERS = "ABCDEFGHJKLMNOPQRST"
 # Volgorde = gemeten sterkte (testharnas 9 okt 2026, go-beginnerbot): het filter is een
 # veel grotere sterkteknop dan het profiel. Zonder filter ~ Bouvardia-niveau (OGS ~24k).
 BOTS = (
+    ("Vaalserberg", "katago", ("preaz_25k", None)),   # vereist gepatchte KataGo (21k-30k)
     ("Zugspitze", "katago", ("preaz_20k", None)),
     ("Mont Blanc", "katago", ("preaz_15k", None)),
     ("Kilimanjaro", "katago", ("preaz_10k", None)),
@@ -30,12 +31,21 @@ BOTS = (
 HUMAN_NET = "b18c384nbt-humanv0.bin.gz"
 
 
+def _weak_ok():
+    """Profielen onder 20k bestaan alleen in de gepatchte KataGo (engines/katago.weak-ok)."""
+    return os.path.exists(os.path.join(ENG, "katago.weak-ok"))
+
+
+def _needs_patch(b):
+    return b[1] == "katago" and int(_profile(b[2]).split("_")[1].rstrip("k")) > 20
+
+
 def available():
-    """Alleen bots waarvan de engine op dit apparaat staat."""
+    """Alleen bots waarvan de engine (en het profiel) op dit apparaat bestaan."""
     have = {"gnugo": os.path.exists(os.path.join(ENG, "gnugo")),
             "katago": os.path.exists(os.path.join(ENG, "katago"))
                       and os.path.exists(os.path.join(ENG, HUMAN_NET))}
-    return [b for b in BOTS if have[b[1]]]
+    return [b for b in BOTS if have[b[1]] and (not _needs_patch(b) or _weak_ok())]
 
 
 def to_gtp(x, y, size):
@@ -207,7 +217,8 @@ def preload(size=9):
         with _warm_lock:
             if _warm is None or _warm.p.poll() is not None:
                 try:
-                    _warm = _start_human(_profile(BOTS[0][2]), size)   # blokkeert tot geladen
+                    first = next(b for b in available() if b[1] == "katago")
+                    _warm = _start_human(_profile(first[2]), size)   # blokkeert tot geladen
                 except OSError:
                     _warm = None
     threading.Thread(target=go, daemon=True).start()
