@@ -220,6 +220,38 @@ def _game_command(gid, command, payload, confirm_tags):
         ws.close()
 
 
+def wait_for_move(gid, nmoves, timeout=90):
+    """Luister op de socket tot er een zet (of fase-wissel) bij komt na `nmoves`
+    zetten. Push i.p.v. pollen: de zet van de tegenstander is er meteen.
+    -> True als er iets veranderde, False bij timeout."""
+    global _jwt
+    import websocket
+    if _jwt is None:
+        _jwt = api("ui/config")["user_jwt"]
+    ws = websocket.create_connection("wss://online-go.com/socket", timeout=5,
+                                     header=["User-Agent: flip-go/0.1"])
+    try:
+        ws.send(json.dumps(["authenticate", {"jwt": _jwt}, 1]))
+        ws.send(json.dumps(["game/connect", {"game_id": gid, "chat": False}, 2]))
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            try:
+                m = json.loads(ws.recv())
+            except websocket.WebSocketTimeoutException:
+                continue
+            if not (isinstance(m, list) and m and isinstance(m[0], str)):
+                continue
+            tag = m[0]
+            if tag == f"game/{gid}/gamedata":      # stand bij verbinden: al gezet?
+                if len(m[1].get("moves", [])) > nmoves or m[1].get("phase") != "play":
+                    return True
+            elif tag in (f"game/{gid}/move", f"game/{gid}/phase"):
+                return True
+        return False
+    finally:
+        ws.close()
+
+
 def submit_move(gid, x, y):
     mv = ".." if x < 0 else chr(97 + x) + chr(97 + y)
     return _game_command(gid, "game/move",
