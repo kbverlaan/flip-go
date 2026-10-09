@@ -1130,7 +1130,7 @@ class ReviewScene:
             m = r["moments"][0]
             mv = review.LET[m["played"][0]] + str(g.size - m["played"][1]) if m["played"] else "pass"
             retro.text(s, f"move {m['t'] + 1} {mv}", 26, 160)
-            retro.text(s, review.CATS.get(m["cat"], (m["cat"],))[0], 170, 160, PAL["text_dim"])
+            retro.text(s, review.CATS.get(m["cat"], (m["cat"],))[0], 154, 160, PAL["text_dim"])
             retro.text_r(s, f"-{max(0, m['lost']):.1f}", 296, 160, PAL["accent"])
         # acties
         retro.dialog_box(s, (16, 186, 288, 26))
