@@ -984,6 +984,32 @@ class OfflineGameScene(GameScene):
         return OfflineScene()
 
 
+REMOTE = "/tmp/flipgo-remote"     # dev: bestaat deze map, dan stuurt Claude toetsen + vraagt shots
+REMOTE_KEYS = {"A": pygame.K_RETURN, "B": pygame.K_BACKSPACE, "START": pygame.K_s,
+               "UP": pygame.K_UP, "DOWN": pygame.K_DOWN, "LEFT": pygame.K_LEFT,
+               "RIGHT": pygame.K_RIGHT}
+
+
+def remote_poll(canvas):
+    """Lees toetsen uit REMOTE/keys (één per regel); SHOT bewaart het scherm."""
+    f = os.path.join(REMOTE, "keys")
+    if not os.path.exists(f):
+        return []
+    try:
+        os.rename(f, f + ".busy")          # atomisch overnemen
+        lines = open(f + ".busy").read().split()
+        os.remove(f + ".busy")
+    except OSError:
+        return []
+    evs = []
+    for k in lines:
+        if k.upper() == "SHOT":
+            pygame.image.save(canvas, os.path.join(REMOTE, "shot.png"))
+        elif k.upper() in REMOTE_KEYS:
+            evs.append(pygame.event.Event(pygame.KEYDOWN, key=REMOTE_KEYS[k.upper()]))
+    return evs
+
+
 def main():
     pygame.init()
     try:
@@ -1015,7 +1041,8 @@ def main():
     scene = TitleScene()
     clock = pygame.time.Clock()
     while True:
-        for ev in pygame.event.get():
+        remote = remote_poll(canvas) if os.path.isdir(REMOTE) else []
+        for ev in pygame.event.get() + remote:
             if ev.type == pygame.QUIT:
                 return
             if ev.type == pygame.JOYDEVICEADDED:
