@@ -1172,12 +1172,13 @@ class GameReviewScene:
             retro.text_r(s, f"move {len(L) - 1}", 306, 79, PAL["text_dim"])
         # zetklassen jij | bot
         retro.dialog_box(s, (8, 94, 150, 96))
-        retro.text(s, "ERRORS", 14, 100)
+        retro.text(s, "MOVES", 14, 100)
         retro.text_r(s, "you", 114, 100, PAL["text_dim"])
         retro.text_r(s, "bot", 152, 100, PAL["text_dim"])
-        for i, (k, lab, sym, _) in enumerate(review.CLASSES[2:]):     # best/good = ruis bij 8 visits
-            y = 120 + i * 20
-            retro.text(s, (("Inacc" if k == "inacc" else lab) + " " + sym).strip(), 14, y, PAL[CLS_COL[k]])
+        for i, (k, lab, sym, _) in enumerate(review.CLASSES):
+            y = 116 + i * 14
+            col = PAL["text"] if k == "good" else PAL[CLS_COL[k]]
+            retro.text(s, (("Inacc" if k == "inacc" else lab) + " " + sym).strip(), 14, y, col)
             retro.text_r(s, str(r["me"].get(k, 0)), 114, y)
             retro.text_r(s, str(r["opp"].get(k, 0)), 152, y, PAL["text_dim"])
         # verlies/zet + fouttypes
