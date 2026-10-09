@@ -22,7 +22,29 @@ CATS = {   # label + twee regels uitleg, elk <= 10 tekens (past in het zijpaneel
     "local": ("Local", "Better", "shape here"),
     "passed": ("Passed", "Passed", "too early"),
 }
-VERSION = 2       # opslagformaat reviews.jsonl (categorieën v2)
+VERSION = 3       # opslagformaat reviews.jsonl (v3: per zet, beide kleuren)
+
+# Zetklassen naar chess.com/ogs-review (verlies in punten): (sleutel, label, symbool, max-verlies)
+CLASSES = (("best", "Best", "", 0.3), ("good", "Good", "", 1.5), ("inacc", "Inaccuracy", "?!", 3.0),
+           ("mistake", "Mistake", "?", 6.0), ("blunder", "Blunder", "??", 1e9))
+
+
+def move_class(lost, played_is_best=False):
+    if played_is_best:
+        return "best"
+    for key, _, _, hi in CLASSES:
+        if lost < hi:
+            return key
+    return "blunder"
+
+
+def phase_of(t, board, size):
+    """Fase per bord (niet als fractie van de pot): opening = eerste 10 (9x9) / 20 (13x13) zetten,
+    eind = bord >= 55% bezet, anders midden."""
+    if t < (10 if size <= 9 else 20):
+        return "open"
+    filled = sum(1 for r in board for v in r if v) / (size * size)
+    return "end" if filled >= 0.55 else "mid"
 
 
 def gtp_xy(m, size):
@@ -94,70 +116,64 @@ def classify(board, n, played, answer, lost, prev, col):
         return "bigpoint"
     return "local"
 
-def compute(size, moves, evals, human=1, pick_from=None):
-    """-> dict met samenvatting, of None als er te weinig evaluaties zijn.
-    pick_from: set beurten waaruit de 3 momenten gekozen worden (de diep doorgerekende top-5)."""
+def compute(size, moves, evals, human=1):
+    """-> dict met per-zet-analyse (beide kleuren) + samenvatting, of None bij te weinig data.
+    evals[t] = stand vóór zet t: {"lead": scoreLead zwart, "best": GTP, "pv": [...]}"""
     board = [[0] * size for _ in range(size)]
     rows, prev = [], None
     for t, (x, y) in enumerate(moves):
         col = 1 if t % 2 == 0 else 2
-        mine = col == human
-        if mine and t in evals and t + 1 in evals:
+        played = None if x < 0 else (x, y)
+        if t in evals and t + 1 in evals:
             sign = 1 if col == 1 else -1
             lost = sign * (evals[t]["lead"] - evals[t + 1]["lead"])
-            played = None if x < 0 else (x, y)
             answer = gtp_xy(evals[t].get("best"), size)
-            if played is None and answer is None:      # passen was ook het beste: geen zet
-                if x >= 0:
-                    goban.apply_move(board, x, y, col)
-                continue
-            if played is not None and answer == played:
-                lost = min(lost, 0.0)          # de beste zet zelf kost niets
-            nxt = moves[t + 1] if t + 1 < len(moves) else None
-            rows.append({"t": t, "lost": round(lost, 2), "played": played, "answer": answer,
-                         "reply": tuple(nxt) if nxt and nxt[0] >= 0 else None,
-                         "pv": [gtp_xy(m, size) for m in evals[t].get("pv") or []],
-                         "cat": classify([r[:] for r in board], t, played, answer, max(lost, 0), prev, col),
-                         "board": [r[:] for r in board], "prev": prev})
-        if x >= 0:
+            is_best = played == answer
+            if is_best:
+                lost = min(lost, 0.0)
+            if not (played is None and answer is None):          # passen dat klopt: geen zet
+                cls = move_class(max(0.0, lost), is_best)
+                nxt = moves[t + 1] if t + 1 < len(moves) else None
+                rows.append({
+                    "t": t, "col": col, "lost": round(lost, 2), "cls": cls,
+                    "cat": classify([r[:] for r in board], t, played, answer, max(lost, 0), prev, col)
+                    if cls in ("inacc", "mistake", "blunder") else None,
+                    "phase": phase_of(t, board, size), "played": played, "answer": answer,
+                    "reply": tuple(nxt) if nxt and nxt[0] >= 0 else None,
+                    "pv": [gtp_xy(m, size) for m in evals[t].get("pv") or []]})
+        if played:
             goban.apply_move(board, x, y, col)
-            prev = (x, y)
-    if len(rows) < 5:
+            prev = played
+    mine = [r for r in rows if r["col"] == human]
+    if len(mine) < 5:
         return None
-    n = len(moves)
-    phase = lambda t: "open" if t < 0.15 * n else "end" if t >= 0.75 * n else "mid"
-    loss = [max(0.0, r["lost"]) for r in rows]
-    by_phase = {}
-    for r in rows:
-        by_phase.setdefault(phase(r["t"]), []).append(max(0.0, r["lost"]))
-    mistakes = [r for r in rows if r["lost"] >= 2.0]
-    cats = {}
-    for r in mistakes:
-        cats[r["cat"]] = cats.get(r["cat"], 0) + 1
-    ranked = sorted(rows, key=lambda r: -r["lost"])
-    cands = [r["t"] for r in ranked[:5]]
-    cands += [r["t"] for r in ranked[5:] if r["lost"] >= BLUNDER][:8]   # blunders = kopgetal
-    pool = [r for r in ranked if pick_from is None or r["t"] in pick_from]
-    top = pool[:3]
+    counts = lambda rs: {k: sum(1 for r in rs if r["cls"] == k) for k, *_ in CLASSES}
+    cats = lambda rs, k: {c: sum(1 for r in rs if r["cls"] == k and r["cat"] == c) for c in CATS
+                          if any(r["cls"] == k and r["cat"] == c for r in rs)}
+    loss = lambda rs: round(sum(max(0.0, r["lost"]) for r in rs) / len(rs), 2) if rs else None
     return {
-        "v": VERSION, "candidates": cands,
-        "moves": n, "my_moves": len(rows),
-        "loss_per_move": round(sum(loss) / len(loss), 2),
-        "blunders": sum(1 for v in loss if v >= BLUNDER),
-        "phases": {k: round(sum(v) / len(v), 2) for k, v in by_phase.items()},
-        "cats": cats,
-        "moments": [{"t": r["t"], "lost": r["lost"], "cat": r["cat"], "played": r["played"],
-                     "answer": r["answer"], "board": r["board"], "prev": r["prev"],
-                     "reply": r["reply"], "pv": r["pv"]} for r in top if r["lost"] > 0.5],
+        "v": VERSION, "moves": len(moves), "rows": rows,
+        "loss_per_move": loss(mine),
+        "phases": {ph: loss([r for r in mine if r["phase"] == ph]) for ph in ("open", "mid", "end")
+                   if any(r["phase"] == ph for r in mine)},
+        "me": counts(mine), "opp": counts([r for r in rows if r["col"] != human]),
+        "types": {k: cats(mine, k) for k in ("blunder", "mistake", "inacc")},
+        "leads": [round(evals[t]["lead"], 1) for t in range(len(moves) + 1) if t in evals],
     }
+
+
+def recheck(rows, limit=20):
+    """Welke beurten opnieuw doorrekenen met meer visits: alle eigen mistakes/blunders (max limit)."""
+    bad = sorted((r for r in rows if r["cls"] in ("mistake", "blunder")), key=lambda r: -r["lost"])
+    return [r["t"] for r in bad[:limit]]
 
 
 # ---------- opslag ----------
 def save(path, entry):
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    slim = dict(entry)
-    slim["moments"] = [{k: v for k, v in m.items() if k != "board"} for m in entry.get("moments", [])]
-    slim.pop("candidates", None)
+    slim = {k: v for k, v in entry.items() if k != "rows"}
+    slim["mine"] = [[r["t"], r["lost"], r["cls"], r["cat"], r["phase"]]     # compact per eigen zet
+                    for r in entry.get("rows", []) if r["col"] == entry.get("human", 1)]
     with open(path, "a") as f:
         f.write(json.dumps(slim, separators=(",", ":")) + "\n")
 

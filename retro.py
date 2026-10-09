@@ -23,6 +23,8 @@ PAL = {
     "text_dim": (136, 144, 152),
     "accent":   (204, 64, 48),    # cursor / actief
     "green":    (88, 152, 72),
+    "orange":   (224, 132, 40),   # review: mistake (?)
+    "yellow":   (196, 164, 40),   # review: inaccuracy (?!)
 }
 
 _fonts = {}
