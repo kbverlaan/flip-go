@@ -58,8 +58,11 @@ class Engine:
                    "-override-config", f"humanSLProfile={arg}"]
         self.kind, self.arg = kind, arg
         self.lock = threading.Lock()
+        err = open(os.path.join(ENG, "engine.log"), "a")    # waarom een engine stopt
+        err.write(f"--- start {kind} {arg}\n")
+        err.flush()
         self.p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                  stderr=subprocess.DEVNULL, text=True, bufsize=1)
+                                  stderr=err, text=True, bufsize=1, cwd=ENG)
         self.size = 0
 
     def new_game(self, size, komi, arg=None):
@@ -81,14 +84,14 @@ class Engine:
 
     def _cmd(self, line):
         if self.p.poll() is not None:
-            return False, "engine stopped"
+            raise OSError(f"engine stopped (exit {self.p.returncode})")
         self.p.stdin.write(line + "\n")
         self.p.stdin.flush()
         out = []
         while True:
             ln = self.p.stdout.readline()
             if not ln:
-                return False, "engine stopped"
+                raise OSError("engine stopped mid-reply")
             if ln.strip() == "" and out:
                 break
             if ln.strip():
@@ -130,7 +133,12 @@ def get_engine(kind, arg, size, komi):
     with _warm_lock:
         if _warm is None or _warm.p.poll() is not None:
             _warm = Engine(kind, arg)
-        if not _warm.new_game(size, komi, arg):
+        try:
+            ok = _warm.new_game(size, komi, arg)
+        except OSError:         # engine net gestorven (broken pipe): één keer opnieuw
+            _warm = Engine(kind, arg)
+            ok = _warm.new_game(size, komi)
+        if not ok:
             _warm.close()
             _warm = Engine(kind, arg)
             _warm.new_game(size, komi)
