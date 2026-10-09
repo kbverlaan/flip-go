@@ -13,11 +13,17 @@ LETTERS = "ABCDEFGHJKLMNOPQRST"
 # Offline tegenstanders: (label, kind, arg). gnugo-arg = level, katago-arg = human-profiel.
 # Bergnamen = MiniGo-bergenladder (humanlike-net speelt als een mens van die rank).
 # Laagste geldige profiel is 20k: een onbekend profiel (preaz_25k) laat KataGo crashen.
+# katago-arg = (profiel, max_loss): de scheidsrechter keurt zetten af die meer dan
+# max_loss punten weggeven (None = alleen pass/opgave bewaken).
+# Volgorde = gemeten sterkte (testharnas 9 okt 2026, go-beginnerbot): het filter is een
+# veel grotere sterkteknop dan het profiel. Zonder filter ~ Bouvardia-niveau (OGS ~24k).
 BOTS = (
-    ("Zugspitze", "katago", "preaz_20k"),
-    ("Fuji", "katago", "preaz_18k"),
-    ("Mont Blanc", "katago", "preaz_15k"),
-    ("Kilimanjaro", "katago", "preaz_10k"),
+    ("Zugspitze", "katago", ("preaz_20k", None)),
+    ("Mont Blanc", "katago", ("preaz_15k", None)),
+    ("Kilimanjaro", "katago", ("preaz_10k", None)),
+    ("Denali", "katago", ("preaz_15k", 6)),
+    ("Aconcagua", "katago", ("preaz_10k", 6)),
+    ("Everest", "katago", ("preaz_10k", 3)),
     ("GNU Go 5", "gnugo", 5),
     ("GNU Go 10", "gnugo", 10),
 )
@@ -123,6 +129,11 @@ class Engine:
 
 _warm = None            # warme KataGo, gedeeld tussen potten
 _warm_lock = threading.Lock()
+_judge = None           # warme b6-scheidsrechter (zie judge.py)
+
+
+def _profile(arg):
+    return arg[0] if isinstance(arg, (tuple, list)) else arg
 
 
 def get_engine(kind, arg, size, komi):
@@ -132,19 +143,31 @@ def get_engine(kind, arg, size, komi):
         e = Engine(kind, arg)
         e.new_game(size, komi)
         return e
+    global _judge
+    prof = _profile(arg)
     with _warm_lock:
         if _warm is None or _warm.p.poll() is not None:
-            _warm = Engine(kind, arg)
+            _warm = Engine(kind, prof)
         try:
-            ok = _warm.new_game(size, komi, arg)
+            ok = _warm.new_game(size, komi, prof)
         except OSError:         # engine net gestorven (broken pipe): één keer opnieuw
-            _warm = Engine(kind, arg)
+            _warm = Engine(kind, prof)
             ok = _warm.new_game(size, komi)
         if not ok:
             _warm.close()
-            _warm = Engine(kind, arg)
+            _warm = Engine(kind, prof)
             _warm.new_game(size, komi)
-        return _warm
+        try:
+            import judge
+        except ImportError:
+            return _warm
+        if not judge.available():
+            return _warm
+        if _judge is None or _judge.p.poll() is not None:
+            _judge = judge.Judge()
+        e = judge.JudgedEngine(_warm, _judge, arg[1] if isinstance(arg, (tuple, list)) else None)
+        e.size, e.komi = size, komi
+        return e
 
 
 def preload():
@@ -155,7 +178,7 @@ def preload():
         global _warm
         with _warm_lock:
             if _warm is None or _warm.p.poll() is not None:
-                _warm = Engine("katago", BOTS[0][2])
+                _warm = Engine("katago", _profile(BOTS[0][2]))
                 _warm.cmd("name")       # blokkeert tot het net geladen is
     threading.Thread(target=go, daemon=True).start()
 
