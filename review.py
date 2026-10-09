@@ -12,14 +12,14 @@ import goban
 
 LET = "ABCDEFGHJKLMNOPQRST"
 BLUNDER = 6.0
-CATS = {   # label (<= 11 tekens) + twee regels uitleg (<= 11 tekens) voor het 8px-font
-    "selfatari": ("Self-atari", "Your stones", "in atari"),
-    "atari": ("Atari", "Capture or", "save stones"),
+CATS = {   # label + twee regels uitleg, elk <= 10 tekens (past in het zijpaneel bij 8px)
+    "selfatari": ("Self-atari", "Own stones", "in atari"),
+    "atari": ("Atari", "Capture or", "save group"),
     "ignored": ("Ignored", "Answer the", "threat"),
-    "cut": ("Cut/connect", "Stones were", "split"),
-    "endgame": ("Endgame", "Boundary", "move missed"),
-    "bigpoint": ("Big point", "Bigger move", "elsewhere"),
-    "local": ("Local", "Better", "local shape"),
+    "cut": ("Cut/link", "Groups got", "cut apart"),
+    "endgame": ("Endgame", "Boundary", "move"),
+    "bigpoint": ("Big point", "Bigger", "elsewhere"),
+    "local": ("Local", "Better", "shape here"),
     "passed": ("Passed", "Passed", "too early"),
 }
 VERSION = 2       # opslagformaat reviews.jsonl (categorieën v2)
