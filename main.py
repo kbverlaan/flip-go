@@ -21,6 +21,8 @@ import retro
 from retro import PAL, W, H
 
 import goban
+import gtp
+import json
 import ogs
 
 _VF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.txt")
@@ -172,7 +174,7 @@ class GamesScene:
             m = ogs.me()
             self.me_label = f"{m.get('username')} - {ogs.rank_label(m.get('ranking'))}"
         except Exception:
-            self.error = "Offline - mock game"
+            self.error = "No connection"
             self.games = []
 
     FOOTER = ("NEW GAME", "HISTORY")
@@ -205,7 +207,7 @@ class GamesScene:
             if self.sel == len(rows):
                 if self.fsel == 1:
                     return HistoryScene()
-                return GameScene(None) if self.error else NewGameScene()
+                return OfflineScene() if self.error else NewGameScene()
             kind, data = rows[self.sel]
             if kind == "game":
                 return GameScene(data["id"])
@@ -259,7 +261,7 @@ class GamesScene:
                     retro.text(s, data["speed"], 240, y + 9, PAL["text_dim"])
         # footer: twee boxen naast elkaar, gameboy-stijl
         on_footer = self.sel == len(rows)
-        left_label = "MOCK BOARD" if self.error else "NEW GAME"
+        left_label = "OFFLINE" if self.error else "NEW GAME"
         for f, (bx, label) in enumerate(((16, left_label), (164, "HISTORY"))):
             retro.dialog_box(s, (bx, 192, 140, 26))
             if on_footer and self.fsel == f:
@@ -280,7 +282,8 @@ class NewGameScene:
     """Nieuwe pot: daily, live (open challenge) of een bot van de bloemenladder."""
     OPTIONS = (("daily", "3d + 1d per move"),
                ("live", "2m + 30s per move"),
-               ("bots", "the flower ladder"))
+               ("bots", "the flower ladder"),
+               ("offline", "local bot, no wifi"))
 
     def __init__(self, back=None):
         self.back = back or GamesScene
@@ -309,6 +312,8 @@ class NewGameScene:
         elif ev.key in A_KEYS:
             if self.OPTIONS[self.sel][0] == "bots":
                 return BotScene()
+            if self.OPTIONS[self.sel][0] == "offline":
+                return OfflineScene()
             self.busy = True
             self.msg = "Posting..."
             threading.Thread(target=self._create, daemon=True).start()
@@ -328,8 +333,8 @@ class NewGameScene:
         retro.text_c(s, "NEW GAME", W // 2, 14, PAL["box"])
         retro.text_c(s, f"< {new_size}x{new_size} > ranked - japanese", W // 2, 34, PAL["text_dim"])
         for i, (name, desc) in enumerate(self.OPTIONS):
-            y = 60 + i * 44
-            retro.dialog_box(s, (60, y, 200, 38))
+            y = 54 + i * 40
+            retro.dialog_box(s, (60, y, 200, 36))
             if i == self.sel:
                 arrow(s, 68, y + 8)
             retro.text(s, name.upper(), 80, y + 7)
@@ -578,7 +583,21 @@ class GameScene:
             self._load()
         except Exception:
             self.msg = f"{action[0]} failed"[:10]
+            self.busy = False
+            return
         self.busy = False
+        snap = self._snap or {}
+        if action[0] in ("move", "pass") and snap.get("phase") == "play" and not snap.get("my_turn"):
+            threading.Thread(target=self._await_opponent, args=(snap.get("nmoves", 0),),
+                             daemon=True).start()
+
+    def _await_opponent(self, nmoves):
+        """Na eigen zet: socket open houden tot de tegenstander zet (push)."""
+        try:
+            if ogs.wait_for_move(self.gid, nmoves):
+                self._load()
+        except Exception as e:
+            print("await opponent:", e)
 
     # ---------- input ----------
     def handle(self, ev):
@@ -765,7 +784,8 @@ class GameScene:
             retro.text_c(s, "YOU WON" if won else "YOU LOST", 270, 112)
             retro.text_c(s, ogs.format_outcome(self.winner_id == self.black_id,
                                                self.outcome), 270, 132)
-            retro.text_c(s, "A games", 270, 156, PAL["text_dim"])
+            retro.text_c(s, "A back" if self.speed == "offline" else "A games", 270, 156,
+                         PAL["text_dim"])
         elif self.phase == "stone removal" and not self.busy:
             retro.dialog_box(s, (224, 96, 92, 92))
             retro.text_c(s, "COUNTING", 270, 112)
@@ -776,6 +796,187 @@ class GameScene:
                 (self.phase == "stone removal" or (playing and not self.my_turn))):
             threading.Thread(target=self._load, daemon=True).start()
         self.t += 1
+
+
+SAVE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conf", "offline.json")
+
+
+def load_offline():
+    try:
+        with open(SAVE) as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+class OfflineScene:
+    """Lokale bot kiezen (engine op het apparaat), of de lopende pot hervatten."""
+
+    def __init__(self):
+        self.saved = load_offline()
+        gtp.preload()
+        self.rows = ([("continue", None)] if self.saved else []) + \
+                    [("bot", b) for b in gtp.available()]
+        self.sel = 0
+
+    def handle(self, ev):
+        global new_size
+        if ev.type != pygame.KEYDOWN:
+            return self
+        if ev.key in B_KEYS:
+            return TitleScene()
+        if ev.key == pygame.K_DOWN:
+            self.sel = min(len(self.rows) - 1, self.sel + 1)
+        elif ev.key == pygame.K_UP:
+            self.sel = max(0, self.sel - 1)
+        elif ev.key in (pygame.K_LEFT, pygame.K_RIGHT):
+            i = BOARD_SIZES.index(new_size) + (1 if ev.key == pygame.K_RIGHT else -1)
+            new_size = BOARD_SIZES[i % len(BOARD_SIZES)]
+        elif ev.key in A_KEYS and self.rows:
+            kind, bot = self.rows[self.sel]
+            if kind == "continue":
+                sv = self.saved
+                bot = next((b for b in gtp.BOTS if b[0] == sv["bot"]), None)
+                if bot:
+                    return OfflineGameScene(bot, sv["size"], sv["moves"])
+            else:
+                return OfflineGameScene(bot, new_size)
+        return self
+
+    def draw(self, s):
+        s.fill(PAL["screen"])
+        retro.text_c(s, "OFFLINE", W // 2, 14, PAL["box"])
+        retro.text_c(s, f"< {new_size}x{new_size} > chinese - komi 7.5", W // 2, 34,
+                     PAL["text_dim"])
+        if not self.rows:
+            retro.text_c(s, "no engine installed", W // 2, 100, PAL["text_dim"])
+        for i, (kind, bot) in enumerate(self.rows):
+            y = 56 + i * 26
+            retro.dialog_box(s, (64, y, 192, 22))
+            if i == self.sel:
+                arrow(s, 72, y + 7)
+            if kind == "continue":
+                sv = self.saved
+                retro.text(s, "CONTINUE", 84, y + 7)
+                retro.text_r(s, f"{sv['size']}x{sv['size']}", 248, y + 7, PAL["text_dim"])
+            else:
+                retro.text(s, bot[0], 84, y + 7)
+        retro.text(s, "B back", 4, 228, PAL["text_dim"])
+        if any(b[1] == "katago" for _, b in self.rows if b) and not gtp.is_warm():
+            retro.text_r(s, "loading bot...", 316, 228, PAL["text_dim"])
+
+
+class OfflineGameScene(GameScene):
+    """Pot tegen een lokale engine. Jij zwart, bot wit; stand in conf/offline.json."""
+    KOMI = 7.5
+
+    def __init__(self, bot, size, moves=None):
+        super().__init__(None)
+        self.back = self._leave        # engine netjes afsluiten bij teruggaan
+        self.gid = "offline"           # truthy: menu, pass/resign en _do werken zoals online
+        self.bot, self.size, self.moves = bot, size, list(moves or [])
+        self.board = [[0] * size for _ in range(size)]
+        self.cx = self.cy = size // 2
+        self.names = ("you", bot[0][:8])
+        self.me_id, self.black_id = 1, 1
+        self.komi, self.rules, self.speed = self.KOMI, "chinese", "offline"
+        self.result = None             # (winner_kleur, 'x points'|'Resignation')
+        self.eng = None
+        self.busy = True
+        self.msg = "Loading..."
+        threading.Thread(target=self._start, daemon=True).start()
+
+    def _start(self):
+        try:
+            self.eng = gtp.get_engine(self.bot[1], self.bot[2], self.size, self.KOMI)
+            for i, (x, y) in enumerate(self.moves):
+                self.eng.play("B" if i % 2 == 0 else "W", x, y)
+            if len(self.moves) % 2 == 1:
+                self._bot_move()
+            self._load()
+        except Exception as e:
+            print("offline: engine start failed:", e)
+            self._snap = {"msg": "No engine"}
+        self.busy = False
+
+    def _passes(self):
+        return len(self.moves) >= 2 and self.moves[-1][0] < 0 and self.moves[-2][0] < 0
+
+    def _finish(self, winner=None, how=None):
+        if winner is None:             # twee keer gepast: engine telt
+            sc = self.eng.score() or "B+0"
+            winner = 1 if sc[0] == "B" else 2
+            how = f"{sc[2:]} points"
+        self.result = (winner, how)
+        try:
+            os.remove(SAVE)
+        except OSError:
+            pass
+
+    def _bot_move(self):
+        self._snap = {"msg": "Thinking...", "my_turn": False, "turn_color": 2}
+        mv = self.eng.genmove("W")
+        if mv == "resign":
+            self._finish(1, "Resignation")
+            return
+        self.moves.append([-1, -1] if mv == "pass" else list(mv))
+        if mv != "pass":
+            play_stone()
+        if self._passes():
+            self._finish()
+
+    def _save(self):
+        if self.result:
+            return
+        os.makedirs(os.path.dirname(SAVE), exist_ok=True)
+        with open(SAVE, "w") as f:
+            json.dump({"bot": self.bot[0], "size": self.size, "moves": self.moves}, f)
+
+    def _load(self):
+        board, cb, cw, last = goban.from_moves(self.size, [m + [0] for m in self.moves])
+        mine = len(self.moves) % 2 == 0 and not self.result
+        bot_passed = bool(self.moves) and self.moves[-1][0] < 0
+        self._snap = dict(
+            board=board, caps=(cb, cw), last=last, nmoves=len(self.moves),
+            phase="finished" if self.result else "play",
+            outcome=self.result[1] if self.result else "",
+            winner_id=self.result[0] if self.result else None,
+            my_color=1, my_turn=mine, turn_color=1 if mine else 2,
+            times=("", ""),
+            msg=("The end." if self.result else
+                 "Bot passed" if mine and bot_passed else
+                 "Your move." if mine else "Thinking..."))
+
+    def _do(self, action):
+        try:
+            if action[0] == "move":
+                if not self.eng.play("B", action[1], action[2]):
+                    self._load()
+                    self._snap["msg"] = "Illegal"
+                    self.busy = False
+                    return
+                self.moves.append([action[1], action[2]])
+                self._bot_move()
+            elif action[0] == "pass":
+                self.eng.play("B", -1, -1)
+                self.moves.append([-1, -1])
+                if self._passes():
+                    self._finish()
+                else:
+                    self._bot_move()
+            elif action[0] == "resign":
+                self._finish(2, "Resignation")
+            self._save()
+            self._load()
+        except Exception as e:
+            print("offline:", e)
+            self._snap = {"msg": f"{action[0]} failed"[:10]}
+        self.busy = False
+
+    def _leave(self):
+        if self.eng and self.eng.kind == "gnugo":     # KataGo blijft warm
+            threading.Thread(target=self.eng.close, daemon=True).start()
+        return OfflineScene()
 
 
 def main():
@@ -829,7 +1030,8 @@ def main():
         scene.draw(canvas)
         pygame.transform.scale(canvas, win.get_size(), win)
         pygame.display.flip()
-        clock.tick(60)
+        # bot denkt / laadt: lage fps laat de CPU aan de engine (en spaart accu)
+        clock.tick(15 if getattr(scene, "busy", False) else 60)
 
 
 if __name__ == "__main__":
