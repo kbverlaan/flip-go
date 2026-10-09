@@ -11,12 +11,13 @@ import os
 import random
 import subprocess
 import threading
+import time
 
 ENG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "engines")
 JUDGE_NET = "b6c96.bin.gz"
 JUDGE_CFG = "judge_analysis.cfg"
 LETTERS = "ABCDEFGHJKLMNOPQRST"
-VISITS = 20
+VISITS = 8           # genoeg voor pass/opgave/grove blunders; ~0,7 s op 13x13 (Flip)
 TEMPERATURE = 0.8      # trekken uit de menselijke policy (lager = vaker de topzet)
 TRIES = 4              # max. aantal menselijke kandidaten dat we laten keuren
 
@@ -123,7 +124,16 @@ class JudgedEngine:
         return items[-1][0] if items else None
 
     def genmove(self, color):
+        t0 = time.monotonic()
+        # scheidsrechter en humanlike-net zijn aparte processen: tegelijk laten rekenen
+        pol = {}
+        th = threading.Thread(target=lambda: pol.update(p=self._policy()))
+        th.start()
         root = self.judge.analyze(self.moves, self.size, self.komi)
+        t_root = time.monotonic() - t0
+        t_pol, checks = 0.0, 0
+        known = {m["move"].upper(): self._lead({"rootInfo": m}, color)
+                 for m in root.get("moveInfos", [])}
         lead = self._lead(root, color)
         best = (root.get("moveInfos") or [{"move": "pass"}])[0]["move"].lower()
         area = self.size * self.size
@@ -134,7 +144,9 @@ class JudgedEngine:
                 self.behind = self.behind + 1 if lead < -(20 if self.size <= 9 else 30) else 0
                 if self.behind >= 3:
                     return "resign"
-            probs = self._policy()
+            th.join()
+            probs = pol["p"]
+            t_pol = time.monotonic() - t0
             mv, best_loss = None, None
             for _ in range(TRIES):
                 if not probs:
@@ -144,9 +156,13 @@ class JudgedEngine:
                     mv = c
                     break
                 g = self._gtp(*c)
-                r = self.judge.analyze(self.moves, self.size, self.komi, {
-                    "allowMoves": [{"player": color, "moves": [g], "untilDepth": 1}]})
-                loss = lead - self._lead(r, color)
+                if g.upper() in known:             # al door de scheidsrechter bekeken
+                    loss = lead - known[g.upper()]
+                else:
+                    checks += 1
+                    r = self.judge.analyze(self.moves, self.size, self.komi, {
+                        "allowMoves": [{"player": color, "moves": [g], "untilDepth": 1}]})
+                    loss = lead - self._lead(r, color)
                 if loss <= self.max_loss:
                     mv = c
                     break
@@ -155,6 +171,9 @@ class JudgedEngine:
                 probs.pop(c)
             if mv is None:
                 mv = best_loss[1] if best_loss else "pass"
+        print(f"judge: zet {len(self.moves)+1} root {t_root:.2f}s policy {t_pol:.2f}s "
+              f"checks {checks} totaal {time.monotonic()-t0:.2f}s", flush=True)
+        th.join()                              # policy-thread nooit laten hangen
         if mv == "pass":
             self.human.cmd(f"play {color} pass")
             self.moves.append([color, "pass"])
