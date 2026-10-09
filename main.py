@@ -23,6 +23,9 @@ from retro import PAL, W, H
 import goban
 import ogs
 
+_VF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.txt")
+VERSION = open(_VF).read().strip()[:7] if os.path.exists(_VF) else "dev"
+
 SCALE = 2  # 640x480 venster; op de Flip fullscreen 2x
 A_KEYS = (pygame.K_RETURN, pygame.K_x)
 B_KEYS = (pygame.K_BACKSPACE, pygame.K_z)
@@ -142,6 +145,7 @@ class TitleScene:
         if (self.t // 30) % 2 == 0:
             retro.text_c(s, "PRESS START", W // 2, 205, PAL["box"])
         retro.text(s, "Y quit", 4, 228, PAL["text_dim"])
+        retro.text_r(s, f"v {VERSION}", 316, 228, PAL["text_dim"])
         draw_status(s)
         self.t += 1
 
