@@ -815,8 +815,9 @@ class GameScene:
             retro.text_c(s, "YOU WON" if won else "YOU LOST", 270, 112)
             retro.text_c(s, ogs.format_outcome(self.winner_id == self.black_id,
                                                self.outcome), 270, 132)
-            retro.text_c(s, "A review" if self.speed == "offline" else "A games", 270, 156,
-                         PAL["text_dim"])
+            can_rev = self.speed == "offline" and hasattr(getattr(self, "eng", None), "evals")
+            retro.text_c(s, "A review" if can_rev else "A back" if self.speed == "offline" else "A games",
+                         270, 156, PAL["text_dim"])
         elif self.phase == "stone removal" and not self.busy:
             retro.dialog_box(s, (224, 96, 92, 92))
             retro.text_c(s, "COUNTING", 270, 112)
@@ -961,12 +962,14 @@ class OfflineGameScene(GameScene):
             self.review = {"error": "review: KataGo bots only"}
             return
         try:
-            e.fill_missing()
-            r = review.compute(self.size, self.moves, e.evals, human=1)
-            if r:
-                for m in r["moments"]:
-                    e.deep(m["t"])
-                r = review.compute(self.size, self.moves, e.evals, human=1)
+            moves = list(self.moves)
+            gtp_moves = list(e.moves)
+            ev = e.fill_missing()                 # momentopname van déze pot
+            r = review.compute(self.size, moves, ev, human=1)
+            if r:                                 # top-5 nauwkeuriger, daaruit de 3 momenten
+                for t in r["candidates"]:
+                    e.deep(t, ev=ev, moves=gtp_moves)
+                r = review.compute(self.size, moves, ev, human=1, pick_from=set(r["candidates"]))
             if not r:
                 self.review = {"error": "game too short"}
                 return
@@ -1044,7 +1047,8 @@ class OfflineGameScene(GameScene):
         self.busy = False
 
     def handle(self, ev):
-        if ev.type == pygame.KEYDOWN and self.phase == "finished" and ev.key in A_KEYS:
+        if ev.type == pygame.KEYDOWN and self.phase == "finished" and ev.key in A_KEYS \
+                and hasattr(self.eng, "evals"):
             return ReviewScene(self)
         return super().handle(ev)
 
@@ -1089,8 +1093,7 @@ class ReviewScene:
         res = "won" if g.result and g.result[0] == 1 else "lost"
         retro.text_c(s, f"vs {g.bot[0]}  {g.size}x{g.size}  {res}", W // 2, 26, PAL["text_dim"])
         if r is None:
-            retro.text_c(s, "analysing" + "." * (int(time.monotonic() * 3) % 4), W // 2, 110,
-                         PAL["text_dim"])
+            retro.text_c(s, "analysing", W // 2, 110, PAL["text_dim"])
             return
         if r.get("error"):
             retro.text_c(s, r["error"], W // 2, 110, PAL["text_dim"])
@@ -1105,7 +1108,7 @@ class ReviewScene:
             sub_ = "first review"
         else:
             d = r["loss_per_move"] - avg
-            sub_ = f"avg {avg:.1f} ({n})  " + ("better" if d < -0.2 else "worse" if d > 0.2 else "same")
+            sub_ = f"prev {n}: {avg:.1f}  " + ("better" if d < -0.2 else "worse" if d > 0.2 else "same")
         retro.text(s, sub_, 26, 66, PAL["text_dim"])
         # 2. blunders + meest gemaakt
         retro.dialog_box(s, (16, 88, 140, 42))
@@ -1114,22 +1117,21 @@ class ReviewScene:
         retro.text(s, "6+ pts", 70, 112, PAL["text_dim"])
         retro.dialog_box(s, (164, 88, 140, 42))
         retro.text(s, "MOST", 174, 96)
-        if r["cats"]:
-            k, v = max(r["cats"].items(), key=lambda kv: kv[1])
-            retro.text(s, f"{review.CATS[k][0]} x{v}", 174, 112)
+        tot = sum(r["cats"].values())
+        k, v = max(r["cats"].items(), key=lambda kv: kv[1]) if tot else (None, 0)
+        if tot and v >= 3 and v >= 0.4 * tot:          # alleen een duidelijk patroon
+            retro.text(s, f"{review.CATS.get(k, (k,))[0]} x{v}", 174, 112)
         else:
-            retro.text(s, "-", 174, 112, PAL["text_dim"])
-        # 3. waar je verloor
+            retro.text(s, "mixed" if tot else "-", 174, 112, PAL["text_dim"])
+        # 3. het ergste moment
         retro.dialog_box(s, (16, 136, 288, 42))
-        retro.text(s, "LOSS BY PHASE", 26, 144)
-        ph = r["phases"]
-        worst = max(ph, key=ph.get) if ph else None
-        x = 26
-        for key, lab in (("open", "open"), ("mid", "mid"), ("end", "end")):
-            if key in ph:
-                col = PAL["accent"] if key == worst and ph[key] >= 1.5 else PAL["text"]
-                retro.text(s, f"{lab} {ph[key]:.1f}", x, 160, col)
-            x += 92
+        retro.text(s, "WORST", 26, 144)
+        if r["moments"]:
+            m = r["moments"][0]
+            mv = review.LET[m["played"][0]] + str(g.size - m["played"][1]) if m["played"] else "pass"
+            retro.text(s, f"move {m['t'] + 1} {mv}", 26, 160)
+            retro.text(s, review.CATS.get(m["cat"], (m["cat"],))[0], 170, 160, PAL["text_dim"])
+            retro.text_r(s, f"-{max(0, m['lost']):.1f}", 296, 160, PAL["accent"])
         # acties
         retro.dialog_box(s, (16, 186, 288, 26))
         retro.text(s, "A MOMENTS", 26, 195)
@@ -1142,6 +1144,7 @@ class MomentScene:
 
     def __init__(self, parent, r, size, i):
         self.parent, self.r, self.size, self.i = parent, r, size, i
+        self.better = False        # A: wat er gebeurde <-> wat beter was
 
     def handle(self, ev):
         if ev.type != pygame.KEYDOWN:
@@ -1149,10 +1152,12 @@ class MomentScene:
         n = len(self.r["moments"])
         if ev.key in B_KEYS:
             return self.parent
-        if ev.key in (pygame.K_RIGHT, pygame.K_DOWN) + A_KEYS:
-            self.i = (self.i + 1) % n
+        if ev.key in A_KEYS:
+            self.better = not self.better
+        elif ev.key in (pygame.K_RIGHT, pygame.K_DOWN):
+            self.i, self.better = (self.i + 1) % n, False
         elif ev.key in (pygame.K_LEFT, pygame.K_UP):
-            self.i = (self.i - 1) % n
+            self.i, self.better = (self.i - 1) % n, False
         return self
 
     def draw(self, s):
@@ -1171,35 +1176,57 @@ class MomentScene:
             col = PAL["white_sh"] if b[py][px] == 1 else PAL["black_hi"]
             pygame.draw.rect(s, col, (ox + px * c - 2, oy + py * c - 2, 5, 5))
         col_me = "B" if m["t"] % 2 == 0 else "W"
-        if m["played"]:
-            x, y = m["played"]
-            retro.stone(s, ox + x * c, oy + y * c, rr, col_me)
-            pygame.draw.rect(s, PAL["accent"], (ox + x * c - 2, oy + y * c - 2, 5, 5))
-        if m["answer"]:
-            x, y = m["answer"]
-            pygame.draw.circle(s, PAL["green"], (ox + x * c, oy + y * c), rr + 1, 2)
+        col_op = "W" if col_me == "B" else "B"
+
+        def numbered(pt, col, k):
+            x, y = pt
+            retro.stone(s, ox + x * c, oy + y * c, rr, col)
+            retro.text_c(s, str(k), ox + x * c + 1, oy + y * c - 3,
+                         PAL["box"] if col == "B" else PAL["text"])
+
+        if not self.better:                            # wat er gebeurde
+            if m["played"]:
+                x, y = m["played"]
+                retro.stone(s, ox + x * c, oy + y * c, rr, col_me)
+                pygame.draw.rect(s, PAL["accent"], (ox + x * c - 2, oy + y * c - 2, 5, 5))
+            if m.get("reply") and m["reply"] != m.get("played"):
+                numbered(m["reply"], col_op, 2)
+        else:                                          # wat beter was: betere zet + vervolg
+            pv = [p for p in (m.get("pv") or []) if p][:3]
+            if m["answer"] and (not pv or pv[0] != m["answer"]):
+                pv = [m["answer"]] + pv[:2]
+            for k, pt in enumerate(pv):
+                numbered(pt, col_me if k % 2 == 0 else col_op, k + 1)
+            if m["answer"]:
+                x, y = m["answer"]
+                pygame.draw.circle(s, PAL["green"], (ox + x * c, oy + y * c), rr + 1, 2)
         # zijpaneel
         cat = review.CATS.get(m["cat"], ("?", "", ""))
         retro.dialog_box(s, (224, 14, 92, 34))
         retro.text(s, f"MOMENT {self.i + 1}/{len(self.r['moments'])}", 230, 20)
-        retro.text(s, f"move {m['t'] + 1}", 230, 34, PAL["text_dim"])
+        mv = review.LET[m["played"][0]] + str(n - m["played"][1]) if m["played"] else "pass"
+        retro.text(s, f"#{m['t'] + 1} {mv}", 228, 34, PAL["text_dim"])
         retro.dialog_box(s, (224, 52, 92, 34))
         retro.text_c(s, f"-{max(0, m['lost']):.1f}", 270, 58, PAL["accent"], 16)
         retro.text_c(s, "points", 270, 76, PAL["text_dim"])
         retro.dialog_box(s, (224, 90, 92, 70))
-        retro.text(s, cat[0], 230, 96)
-        retro.text(s, cat[1], 230, 112, PAL["text_dim"])
-        retro.text(s, cat[2], 230, 124, PAL["text_dim"])
+        retro.text(s, cat[0], 228, 96)
+        retro.text(s, cat[1], 228, 112, PAL["text_dim"])
+        retro.text(s, cat[2], 228, 124, PAL["text_dim"])
         if not m["played"]:
-            retro.text(s, "you passed", 230, 144, PAL["accent"])
+            retro.text(s, "you passed", 228, 144, PAL["accent"])
         retro.dialog_box(s, (224, 164, 92, 30))
-        pygame.draw.rect(s, PAL["accent"], (231, 170, 5, 5))
-        retro.text(s, "you", 242, 169, PAL["text_dim"])
-        pygame.draw.circle(s, PAL["green"], (234, 184), 4, 2)
-        retro.text(s, "better", 242, 181, PAL["text_dim"])
+        if not self.better:
+            pygame.draw.rect(s, PAL["accent"], (231, 170, 5, 5))
+            retro.text(s, "you", 242, 169, PAL["text_dim"])
+            retro.text(s, "2 reply", 230, 181, PAL["text_dim"])
+        else:
+            pygame.draw.circle(s, PAL["green"], (234, 172), 4, 2)
+            retro.text(s, "better", 242, 169, PAL["text_dim"])
+            retro.text(s, "123 line", 230, 181, PAL["text_dim"])
         retro.dialog_box(s, (224, 198, 92, 28))
-        retro.text(s, "<> next", 230, 203, PAL["text_dim"])
-        retro.text(s, "B back", 230, 214, PAL["text_dim"])
+        retro.text(s, "A " + ("played" if self.better else "better"), 228, 203, PAL["text_dim"])
+        retro.text(s, "<> next", 228, 214, PAL["text_dim"])
 
 
 class TrendScene:
@@ -1239,9 +1266,18 @@ class TrendScene:
                 v = min(top, r["loss_per_move"])
                 hgt = max(1, int(v / top * 64))
                 col = PAL["green"] if r.get("won") else PAL["box_dk"]
-                pygame.draw.rect(s, col, (x0 + i * 24, base - hgt, w - 6, hgt))
+                bx = x0 + i * 24
+                pygame.draw.rect(s, col, (bx, base - hgt, w - 6, hgt))
+                if r["loss_per_move"] > top:          # afgekapt: pijltje bovenop
+                    pygame.draw.polygon(s, PAL["accent"], [(bx, base - hgt - 1), (bx + w - 7, base - hgt - 1),
+                                                           (bx + (w - 6) // 2, base - hgt - 5)])
+            last = h[-1]["loss_per_move"]
             avg = sum(r["loss_per_move"] for r in h) / len(h)
-            retro.text_r(s, f"avg {avg:.1f}", 296, 48, PAL["text_dim"])
+            ay = base - int(min(top, avg) / top * 64)
+            for xx in range(52, 292, 6):               # stippellijn: gemiddelde
+                pygame.draw.line(s, PAL["accent"], (xx, ay), (xx + 2, ay))
+            retro.text_r(s, f"avg {avg:.1f}", 296, 48, PAL["accent"])
+            retro.text_r(s, f"last {last:.1f}", 296 - 8 * 9, 48, PAL["text"])
         retro.dialog_box(s, (16, 150, 288, 50))
         retro.text(s, "MOST COMMON", 26, 158)
         cats = {}
@@ -1250,7 +1286,7 @@ class TrendScene:
                 cats[k] = cats.get(k, 0) + v
         top2 = sorted(cats.items(), key=lambda kv: -kv[1])[:2]
         for j, (k, v) in enumerate(top2):
-            retro.text(s, f"{review.CATS[k][0]}", 26 + j * 140, 176)
+            retro.text(s, f"{review.CATS.get(k, (k,))[0]}", 26 + j * 140, 176)
             retro.text_r(s, f"x{v}", 150 + j * 140, 176, PAL["text_dim"])
         if not top2:
             retro.text(s, "-", 26, 176, PAL["text_dim"])
