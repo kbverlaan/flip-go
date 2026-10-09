@@ -135,13 +135,17 @@ def device_status():
     return _dev["v"]
 
 
+def bar(s, x, y, w, p):
+    pygame.draw.rect(s, PAL["box_dk"], (x, y, w, 8), 1)
+    pygame.draw.rect(s, PAL["green"], (x + 2, y + 2, int((w - 4) * p), 4))
+
+
 def load_bar(s, x, y, w):
     """Laadbalk voor KataGo (zie gtp.load_progress); -> False als er niets laadt."""
     p = gtp.load_progress()
     if p is None:
         return False
-    pygame.draw.rect(s, PAL["box_dk"], (x, y, w, 8), 1)
-    pygame.draw.rect(s, PAL["green"], (x + 2, y + 2, int((w - 4) * p), 4))
+    bar(s, x, y, w, p)
     return True
 
 
@@ -966,7 +970,7 @@ class OfflineGameScene(GameScene):
             os.remove(SAVE)
         except OSError:
             pass
-        self.review = None
+        self.review = self.analysing = None
         threading.Thread(target=self._make_review, daemon=True).start()
 
     def _make_review(self):
@@ -978,12 +982,26 @@ class OfflineGameScene(GameScene):
             return
         try:
             moves, gtp_moves = list(self.moves), list(e.moves)
-            ev = e.fill_missing()                 # momentopname van déze pot (8 visits, uniform)
+            # voortgang in werkeenheden: stelling op 8 visits = 1, op 30 visits = DEEP.
+            # Het aantal fouten om opnieuw door te rekenen volgt al uit de beoordelingen
+            # van tijdens de pot, dus het totaal staat vooraf (bijna) vast.
+            DEEP = 3
+            r0 = review.compute(self.size, moves, dict(e.evals), human=1)
+            n_deep = len(review.recheck(r0["rows"])) if r0 else 0
+            missing = sum(1 for t in range(len(moves) + 1) if t not in e.evals)
+            work = {"base": 0.0, "done": 0, "total": max(1, missing + 2 * DEEP * n_deep)}
+
+            def step(w=1):                        # balk loopt nooit terug, ook als het totaal wijzigt
+                work["done"] += w
+                self.analysing = min(0.99, work["base"] + (1 - work["base"]) * work["done"] / work["total"])
+            self.analysing = 0.0
+            ev = e.fill_missing(step)             # momentopname van déze pot (8 visits, uniform)
             r = review.compute(self.size, moves, ev, human=1)
             if r:                                 # eigen fouten nauwkeuriger, in een APARTE dict
-                evd = {}
-                for t in review.recheck(r["rows"]):
-                    e.deep(t, ev=evd, moves=gtp_moves)
+                evd, todo = {}, review.recheck(r["rows"])
+                work.update(base=self.analysing, done=0, total=max(1, 2 * DEEP * len(todo)))
+                for t in todo:
+                    e.deep(t, ev=evd, moves=gtp_moves, step=lambda: step(DEEP))
                 r = review.compute(self.size, moves, ev, human=1, deep=evd)
             if not r:
                 self.review = {"error": "game too short"}
@@ -1131,6 +1149,8 @@ class GameReviewScene:
         retro.text_c(s, f"vs {g.bot[0]}  {g.size}x{g.size}  {res}", W // 2, 20, PAL["text_dim"])
         if r is None or r.get("error"):
             retro.text_c(s, r["error"] if r else "analysing", W // 2, 110, PAL["text_dim"])
+            if r is None and getattr(g, "analysing", None) is not None:
+                bar(s, 110, 124, 100, g.analysing)
             retro.text(s, "B back", 4, 228, PAL["text_dim"])
             return
         # scoreverloop (jouw perspectief: boven = jij voor)
