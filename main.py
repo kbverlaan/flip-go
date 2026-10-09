@@ -1146,6 +1146,18 @@ class MomentScene:
         self.parent, self.r, self.size, self.i = parent, r, size, i
         self.better = False        # A: wat er gebeurde <-> wat beter was
 
+    @staticmethod
+    def _line(m):
+        """Betere zet + vervolg (max 3), stopt bij de eerste pass in de variant."""
+        pv = []
+        for p in (m.get("pv") or [])[:3]:
+            if not p:
+                break
+            pv.append(tuple(p))
+        if m["answer"] and (not pv or pv[0] != tuple(m["answer"])):
+            pv = [tuple(m["answer"])] + pv[:2]
+        return pv
+
     def handle(self, ev):
         if ev.type != pygame.KEYDOWN:
             return self
@@ -1192,9 +1204,7 @@ class MomentScene:
             if m.get("reply") and m["reply"] != m.get("played"):
                 numbered(m["reply"], col_op, 2)
         else:                                          # wat beter was: betere zet + vervolg
-            pv = [p for p in (m.get("pv") or []) if p][:3]
-            if m["answer"] and (not pv or pv[0] != m["answer"]):
-                pv = [m["answer"]] + pv[:2]
+            pv = self._line(m)
             for k, pt in enumerate(pv):
                 numbered(pt, col_me if k % 2 == 0 else col_op, k + 1)
             if m["answer"]:
@@ -1223,7 +1233,9 @@ class MomentScene:
         else:
             pygame.draw.circle(s, PAL["green"], (234, 172), 4, 2)
             retro.text(s, "better", 242, 169, PAL["text_dim"])
-            retro.text(s, "123 line", 230, 181, PAL["text_dim"])
+            k = len(self._line(m))
+            if k > 1:
+                retro.text(s, "".join(str(i + 1) for i in range(k)) + " line", 230, 181, PAL["text_dim"])
         retro.dialog_box(s, (224, 198, 92, 28))
         retro.text(s, "A " + ("played" if self.better else "better"), 228, 203, PAL["text_dim"])
         retro.text(s, "<> next", 228, 214, PAL["text_dim"])
@@ -1275,8 +1287,8 @@ class TrendScene:
             avg = sum(r["loss_per_move"] for r in h) / len(h)
             ay = base - int(min(top, avg) / top * 64)
             for xx in range(52, 292, 6):               # stippellijn: gemiddelde
-                pygame.draw.line(s, PAL["accent"], (xx, ay), (xx + 2, ay))
-            retro.text_r(s, f"avg {avg:.1f}", 296, 48, PAL["accent"])
+                pygame.draw.line(s, PAL["text_dim"], (xx, ay), (xx + 2, ay))
+            retro.text_r(s, f"avg {avg:.1f}", 296, 48, PAL["text_dim"])
             retro.text_r(s, f"last {last:.1f}", 296 - 8 * 9, 48, PAL["text"])
         retro.dialog_box(s, (16, 150, 288, 50))
         retro.text(s, "MOST COMMON", 26, 158)

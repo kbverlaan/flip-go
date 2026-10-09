@@ -78,13 +78,17 @@ def classify(board, n, played, answer, lost, prev, col):
         if weak and any(any((nx, ny) in g for g in weak) for nx, ny in goban._nbrs(bx, by, size)) \
                 and dist(played, answer) >= far:
             return "ignored"
-    # 4. snijden/verbinden: het antwoord grenst aan >= 2 verschillende groepen van één kleur
-    if len(_groups_adj(board, bx, by, col)) >= 2 or len(_groups_adj(board, bx, by, opp)) >= 2:
-        return "cut"
-    # 5. eindspel: bord grotendeels vol, rand, klein verlies
+    # 4. eindspel: bord grotendeels vol, rand, klein verlies (vóór Cut: op een vol bord
+    #    raakt bijna elk randpunt twee groepen)
     empty = sum(1 for r in board for v in r if v == 0) / (size * size)
     if empty <= 0.45 and min(bx, by, size - 1 - bx, size - 1 - by) <= 1 and lost < 6:
         return "endgame"
+    # 5. snijden/verbinden: het antwoord grenst aan >= 2 groepen van één kleur, en minstens
+    #    één daarvan is kwetsbaar (<= 3 vrijheden)
+    for c in (col, opp):
+        gs = _groups_adj(board, bx, by, c)
+        if len(gs) >= 2 and any(l <= 3 for _, l in gs):
+            return "cut"
     # 6. groot punt elders
     if dist(played, answer) >= far and dist(prev, answer) >= far:
         return "bigpoint"
