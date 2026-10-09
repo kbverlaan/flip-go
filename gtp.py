@@ -160,8 +160,10 @@ def _gpu_ok():
 # ---------- laadbalk ----------
 # KataGo meldt in GTP-modus geen voortgang. Op hetzelfde apparaat is de laadtijd per
 # (GPU/CPU, start/wissel, bordmaat) wel vrij constant: de balk loopt op de vorige meting.
+# Stappen die op elkaar volgen (opstarten, afbreken, opnieuw) vormen één balk die nooit
+# terugloopt: duurt het langer dan verwacht, dan blijft hij staan.
 LOADTIMES = os.path.join(HERE, "conf", "loadtimes.json")
-_load = None            # (t0, verwachte duur) zolang er geladen wordt
+_bar = None             # {"t0", "exp", "phase": t0 lopende stap of None, "end", "shown"}
 
 
 def _loadtimes():
@@ -177,17 +179,20 @@ class _timed:
         self.key = key
 
     def __enter__(self):
-        global _load
-        default = 30.0 if "start" in self.key else 20.0
-        _load = (time.monotonic(), _loadtimes().get(self.key, default))
+        global _bar
+        now = time.monotonic()
+        exp = _loadtimes().get(self.key, 30.0 if "start" in self.key else 20.0)
+        if _bar and (_bar["phase"] or now - _bar["end"] < 2):     # vervolgstap: zelfde balk
+            _bar.update(exp=(now - _bar["t0"]) + exp, phase=now)
+        else:
+            _bar = {"t0": now, "exp": exp, "phase": now, "end": 0, "shown": 0.0}
 
     def __exit__(self, exc, *_):
-        global _load
-        t0, _ = _load
-        _load = None
+        now = time.monotonic()
+        dt = now - _bar["phase"]
+        _bar.update(phase=None, end=now)
         if exc is None:
             d = _loadtimes()
-            dt = time.monotonic() - t0
             d[self.key] = round(dt if self.key not in d else (d[self.key] + dt) / 2, 1)
             try:
                 os.makedirs(os.path.dirname(LOADTIMES), exist_ok=True)
@@ -200,28 +205,36 @@ class _timed:
 def load_progress():
     """-> 0..1 terwijl KataGo laadt of van bordmaat wisselt, anders None. Tot 90% lineair
     op de verwachte duur; daarna kruipt hij naar 99% en pas 'klaar' sluit hem af."""
-    ld = _load
-    if ld is None:
+    b = _bar
+    if b is None or b["phase"] is None:
         return None
-    el, exp = time.monotonic() - ld[0], max(1.0, ld[1])
-    if el < 0.9 * exp:
-        return el / exp
-    return 0.9 + 0.09 * (1 - math.exp(-(el - 0.9 * exp) / (0.15 * exp)))
+    el, exp = time.monotonic() - b["t0"], max(1.0, b["exp"])
+    p = el / exp if el < 0.9 * exp else 0.9 + 0.09 * (1 - math.exp(-(el - 0.9 * exp) / (0.15 * exp)))
+    b["shown"] = max(b["shown"], p)
+    return b["shown"]
 
 
-def _start_human(prof, size):
+_loading = None         # KataGo die nu opstart (om af te breken bij een andere bordmaat)
+
+
+def _start_human(prof, size, abortable=False):
     """Start + wacht tot geladen; valt bij een GPU-fout één keer terug op de CPU."""
-    global _gpu_broken
+    global _gpu_broken, _loading
     e = Engine("katago", prof, size)
+    if abortable:
+        _loading = e
     try:
         with _timed(("gpu" if e.gpu else "cpu") + f"-start{size}"):
             e.cmd("name")
         return e
     except OSError:
-        if not e.gpu:
+        if not e.gpu or getattr(e, "aborted", False):
             raise
         _gpu_broken = True
-        return _start_human(prof, size)
+        return _start_human(prof, size, abortable)
+    finally:
+        if _loading is e:
+            _loading = None
 
 
 _warm = None            # warme KataGo, gedeeld tussen potten
@@ -286,13 +299,17 @@ def preload(size=9):
             time.sleep(0.8)
             if _want != size:
                 return
+            ld = _loading
+            if ld is not None and ld.size != size and ld.p.poll() is None:
+                ld.aborted = True       # nog aan het opstarten op een andere maat: opnieuw
+                ld.p.kill()             # beginnen is sneller dan afmaken + omschakelen
         with _warm_lock:
             if _want != size:
                 return
             try:
                 if _warm is None or _warm.p.poll() is not None:
                     prof = _profile(next(b for b in available() if b[1] == "katago")[2])
-                    _warm = _start_human(prof, size)   # blokkeert tot geladen
+                    _warm = _start_human(prof, size, abortable=True)   # blokkeert tot geladen
                 elif _warm.size != size and size in (9, 13):    # 19x19 niet getuned: niet vooraf
                     _warm.new_game(size, 6.5)
             except OSError:
