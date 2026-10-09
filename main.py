@@ -858,8 +858,9 @@ class OfflineScene:
                      PAL["text_dim"])
         if not self.rows:
             retro.text_c(s, "no engine installed", W // 2, 100, PAL["text_dim"])
-        for i, (kind, bot) in enumerate(self.rows):
-            y = 48 + i * 22
+        off = max(0, min(self.sel - 3, len(self.rows) - 7))      # 7 zichtbaar, scrollt
+        for i, (kind, bot) in enumerate(self.rows[off:off + 7], off):
+            y = 48 + (i - off) * 22
             retro.dialog_box(s, (64, y, 192, 20))
             if i == self.sel:
                 arrow(s, 72, y + 6)
