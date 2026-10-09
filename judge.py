@@ -42,14 +42,14 @@ class Judge:
         self.qid = 0
         self.lock = threading.Lock()
 
-    def analyze(self, moves, size, komi, extra=None):
+    def analyze(self, moves, size, komi, extra=None, visits=None):
         """-> response-dict (rootInfo/moveInfos) voor de stand na `moves`."""
         with self.lock:
             if self.p.poll() is not None:
                 raise OSError("judge stopped")
             self.qid += 1
             q = dict(id=str(self.qid), moves=moves, rules="japanese", komi=komi,
-                     boardXSize=size, boardYSize=size, maxVisits=VISITS,
+                     boardXSize=size, boardYSize=size, maxVisits=visits or VISITS,
                      analyzeTurns=[len(moves)])
             q.update(extra or {})
             self.p.stdin.write(json.dumps(q) + "\n")
@@ -81,11 +81,13 @@ class JudgedEngine:
         self.arg = human.arg
         self.size, self.komi, self.moves, self.behind = 9, 6.5, [], 0
         self.rng = random.Random()
+        self.evals = {}            # beurt -> {"lead": scoreLead zwart, "best": GTP} (voor review.py)
 
     def new_game(self, size, komi, arg=None):
         ok = self.human.new_game(size, komi, arg)
         self.arg = self.human.arg
         self.size, self.komi, self.moves, self.behind = size, komi, [], 0
+        self.evals = {}
         return ok
 
     def _gtp(self, x, y):
@@ -96,6 +98,34 @@ class JudgedEngine:
             return False
         self.moves.append([color, self._gtp(x, y)])
         return True
+
+    def _remember(self, t, r):
+        infos = r.get("moveInfos") or []
+        self.evals[t] = {"lead": r["rootInfo"]["scoreLead"],
+                         "best": infos[0]["move"] if infos else None}
+
+    def eval_async(self):
+        """Beoordeel de stand waarin de mens aan zet is, op de achtergrond (tijdens zijn bedenktijd)."""
+        t, moves = len(self.moves), list(self.moves)
+        if t in self.evals:
+            return
+        def go():
+            try:
+                self._remember(t, self.judge.analyze(moves, self.size, self.komi))
+            except Exception:
+                pass
+        threading.Thread(target=go, daemon=True).start()
+
+    def fill_missing(self, upto=None):
+        """Na de pot: ontbrekende stellingen (bv. hervatte pot) alsnog beoordelen."""
+        for t in range((upto or len(self.moves)) + 1):
+            if t not in self.evals:
+                self._remember(t, self.judge.analyze(self.moves[:t], self.size, self.komi))
+
+    def deep(self, t, visits=30):
+        """Nauwkeuriger (meer visits) voor een review-moment: vóór en na zet t."""
+        for u in (t, t + 1):
+            self._remember(u, self.judge.analyze(self.moves[:u], self.size, self.komi, visits=visits))
 
     def _lead(self, r, col):
         s = r["rootInfo"]["scoreLead"]          # zwart-perspectief (judge-config)
@@ -130,6 +160,7 @@ class JudgedEngine:
         th = threading.Thread(target=lambda: pol.update(p=self._policy()))
         th.start()
         root = self.judge.analyze(self.moves, self.size, self.komi)
+        self._remember(len(self.moves), root)
         t_root = time.monotonic() - t0
         t_pol, checks = 0.0, 0
         known = {m["move"].upper(): self._lead({"rootInfo": m}, color)
@@ -177,10 +208,12 @@ class JudgedEngine:
         if mv == "pass":
             self.human.cmd(f"play {color} pass")
             self.moves.append([color, "pass"])
+            self.eval_async()
             return "pass"
         x, y = mv
         self.human.cmd(f"play {color} {self._gtp(x, y)}")
         self.moves.append([color, self._gtp(x, y)])
+        self.eval_async()                      # stand voor de mens: tijdens zijn bedenktijd
         return x, y
 
     def score(self):

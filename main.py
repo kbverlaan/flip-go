@@ -24,6 +24,38 @@ import goban
 import gtp
 import json
 import ogs
+import review
+
+_BG = {}
+
+
+def board_bg(n):
+    """Statisch bord (hout, raster, hoshi) 1x gerenderd per bordmaat (gedeeld)."""
+    if n not in _BG:
+        c = min(23, 192 // max(1, n - 1))
+        span = c * (n - 1)
+        o = (212 - span) // 2
+        bg = pygame.Surface((212, 212))
+        bg.fill(PAL["wood"])
+        pygame.draw.rect(bg, PAL["line"], (0, 0, 212, 212), 1)
+        for i in range(n):
+            pygame.draw.line(bg, PAL["line"], (o, o + i * c), (o + span, o + i * c))
+            pygame.draw.line(bg, PAL["line"], (o + i * c, o), (o + i * c, o + span))
+        e = 2 if n < 13 else 3
+        hoshi = [(a, b) for a in (e, n - 1 - e) for b in (e, n - 1 - e)] + [(n // 2, n // 2)]
+        if n == 19:
+            hoshi += [(3, 9), (15, 9), (9, 3), (9, 15)]
+        if n in (9, 13, 19):
+            for hx, hy in hoshi:
+                pygame.draw.rect(bg, PAL["line"], (o + hx * c - 1, o + hy * c - 1, 3, 3))
+        _BG[n] = bg
+    return _BG[n]
+
+
+def board_geom(n):
+    c = min(23, 192 // max(1, n - 1))
+    span = c * (n - 1)
+    return c, 4 + (212 - span) // 2, 14 + (212 - span) // 2, max(4, c * 2 // 5 + 1)
 
 _VF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.txt")
 VERSION = open(_VF).read().strip()[:7] if os.path.exists(_VF) else "dev"
@@ -522,8 +554,6 @@ class GameScene:
         self.confirm = None      # ("move",x,y) | ("pass",) | ("resign",)
         self._snap = None        # door _load gepubliceerd, door draw overgenomen
         self._loading = False
-        self._bg = None
-        self._bg_size = None
         self.menu = None         # None | cursor-index
         self.info = False
         self.busy = False
@@ -719,27 +749,7 @@ class GameScene:
                      PAL["text"] if to_move and self.phase == "play" else PAL["text_dim"])
 
     def _board_bg(self):
-        """Statisch bord (hout, raster, hoshi) 1x gerenderd per bordmaat."""
-        if self._bg is None or self._bg_size != self.size:
-            n = self.size
-            c = min(23, 192 // max(1, n - 1))
-            span = c * (n - 1)
-            o = (212 - span) // 2
-            bg = pygame.Surface((212, 212))
-            bg.fill(PAL["wood"])
-            pygame.draw.rect(bg, PAL["line"], (0, 0, 212, 212), 1)
-            for i in range(n):
-                pygame.draw.line(bg, PAL["line"], (o, o + i * c), (o + span, o + i * c))
-                pygame.draw.line(bg, PAL["line"], (o + i * c, o), (o + i * c, o + span))
-            e = 2 if n < 13 else 3
-            hoshi = [(a, b) for a in (e, n - 1 - e) for b in (e, n - 1 - e)] + [(n // 2, n // 2)]
-            if n == 19:
-                hoshi += [(3, 9), (15, 9), (9, 3), (9, 15)]
-            if n in (9, 13, 19):
-                for hx, hy in hoshi:
-                    pygame.draw.rect(bg, PAL["line"], (o + hx * c - 1, o + hy * c - 1, 3, 3))
-            self._bg, self._bg_size = bg, n
-        return self._bg
+        return board_bg(self.size)
 
     def draw(self, s):
         if self._snap:               # atomaire overname van een verse load
@@ -805,7 +815,7 @@ class GameScene:
             retro.text_c(s, "YOU WON" if won else "YOU LOST", 270, 112)
             retro.text_c(s, ogs.format_outcome(self.winner_id == self.black_id,
                                                self.outcome), 270, 132)
-            retro.text_c(s, "A back" if self.speed == "offline" else "A games", 270, 156,
+            retro.text_c(s, "A review" if self.speed == "offline" else "A games", 270, 156,
                          PAL["text_dim"])
         elif self.phase == "stone removal" and not self.busy:
             retro.dialog_box(s, (224, 96, 92, 92))
@@ -845,6 +855,8 @@ class OfflineScene:
         global new_size
         if ev.type != pygame.KEYDOWN:
             return self
+        if ev.key == pygame.K_s:
+            return TrendScene(self)
         if ev.key in B_KEYS:
             return TitleScene()
         if ev.key == pygame.K_DOWN:
@@ -884,7 +896,7 @@ class OfflineScene:
                 retro.text_r(s, f"{sv['size']}x{sv['size']}", 248, y + 6, PAL["text_dim"])
             else:
                 retro.text(s, bot[0], 84, y + 6)
-        retro.text(s, "B back", 4, 228, PAL["text_dim"])
+        retro.text(s, "B back  START trend", 4, 228, PAL["text_dim"])
         if any(b[1] == "katago" for _, b in self.rows if b) and not gtp.is_warm():
             retro.text_r(s, "loading bot...", 316, 228, PAL["text_dim"])
 
@@ -904,6 +916,7 @@ class OfflineGameScene(GameScene):
         self.me_id, self.black_id = 1, 1
         self.komi, self.rules, self.speed = self.KOMI, "japanese", "offline"
         self.result = None             # (winner_kleur, 'x points'|'Resignation')
+        self.review = None
         self.eng = None
         self.busy = True
         self.msg = "Loading bot" if bot[1] == "katago" and not gtp.is_warm() else "Loading..."
@@ -916,6 +929,8 @@ class OfflineGameScene(GameScene):
                 self.eng.play("B" if i % 2 == 0 else "W", x, y)
             if len(self.moves) % 2 == 1:
                 self._bot_move()
+            elif hasattr(self.eng, "eval_async"):
+                self.eng.eval_async()          # stand voor de mens alvast beoordelen (review)
             self._load()
         except Exception as e:
             print("offline: engine start failed:", e)
@@ -935,6 +950,33 @@ class OfflineGameScene(GameScene):
             os.remove(SAVE)
         except OSError:
             pass
+        self.review = None
+        threading.Thread(target=self._make_review, daemon=True).start()
+
+    def _make_review(self):
+        """Na de pot: ontbrekende stellingen aanvullen, de 3 duurste momenten nauwkeuriger
+        doorrekenen (30 visits) en het resultaat in conf/reviews.jsonl bewaren."""
+        e = self.eng
+        if not hasattr(e, "evals"):
+            self.review = {"error": "review: KataGo bots only"}
+            return
+        try:
+            e.fill_missing()
+            r = review.compute(self.size, self.moves, e.evals, human=1)
+            if r:
+                for m in r["moments"]:
+                    e.deep(m["t"])
+                r = review.compute(self.size, self.moves, e.evals, human=1)
+            if not r:
+                self.review = {"error": "game too short"}
+                return
+            r.update(size=self.size, bot=self.bot[0], won=self.result[0] == 1,
+                     date=time.strftime("%Y-%m-%d"))
+            review.save(REVIEWS, r)
+            self.review = r
+        except Exception as ex:
+            print("review:", ex)
+            self.review = {"error": "review failed"}
 
     def _bot_move(self):
         self._snap = {"msg": "Thinking...", "my_turn": False, "turn_color": 2}
@@ -1001,10 +1043,220 @@ class OfflineGameScene(GameScene):
             self._snap = {"msg": f"{action[0]} failed"[:10]}
         self.busy = False
 
+    def handle(self, ev):
+        if ev.type == pygame.KEYDOWN and self.phase == "finished" and ev.key in A_KEYS:
+            return ReviewScene(self)
+        return super().handle(ev)
+
     def _leave(self):
         if self.eng and self.eng.kind == "gnugo":     # KataGo blijft warm
             threading.Thread(target=self.eng.close, daemon=True).start()
         return OfflineScene()
+
+REVIEWS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conf", "reviews.jsonl")
+
+
+def _avg_before(size, exclude_last=True):
+    h = review.history(REVIEWS, size, 11)
+    if exclude_last:
+        h = h[:-1]
+    h = h[-10:]
+    return (sum(r["loss_per_move"] for r in h) / len(h), len(h)) if h else (None, 0)
+
+
+class ReviewScene:
+    """Na de pot: verlies per zet, blunders, meest gemaakte fout, waar je verloor."""
+
+    def __init__(self, game):
+        self.game = game           # OfflineGameScene (review kan nog berekend worden)
+
+    def handle(self, ev):
+        if ev.type != pygame.KEYDOWN:
+            return self
+        r = self.game.review
+        if ev.key in B_KEYS:
+            return self.game._leave()
+        if ev.key in A_KEYS and r and r.get("moments"):
+            return MomentScene(self, r, self.game.size, 0)
+        if ev.key == pygame.K_s:
+            return TrendScene(self, self.game.size)
+        return self
+
+    def draw(self, s):
+        s.fill(PAL["screen"])
+        g, r = self.game, self.game.review
+        retro.text_c(s, "REVIEW", W // 2, 10, PAL["box"])
+        res = "won" if g.result and g.result[0] == 1 else "lost"
+        retro.text_c(s, f"vs {g.bot[0]}  {g.size}x{g.size}  {res}", W // 2, 26, PAL["text_dim"])
+        if r is None:
+            retro.text_c(s, "analysing" + "." * (int(time.monotonic() * 3) % 4), W // 2, 110,
+                         PAL["text_dim"])
+            return
+        if r.get("error"):
+            retro.text_c(s, r["error"], W // 2, 110, PAL["text_dim"])
+            retro.text(s, "B back", 4, 228, PAL["text_dim"])
+            return
+        # 1. het getal
+        retro.dialog_box(s, (16, 40, 288, 42))
+        retro.text(s, "LOSS PER MOVE", 26, 48)
+        retro.text_r(s, f"{r['loss_per_move']:.1f}", 296, 46, PAL["text"], 16)
+        avg, n = _avg_before(g.size)
+        if avg is None:
+            sub_ = "first review"
+        else:
+            d = r["loss_per_move"] - avg
+            sub_ = f"avg {avg:.1f} ({n})  " + ("better" if d < -0.2 else "worse" if d > 0.2 else "same")
+        retro.text(s, sub_, 26, 66, PAL["text_dim"])
+        # 2. blunders + meest gemaakt
+        retro.dialog_box(s, (16, 88, 140, 42))
+        retro.text(s, "BLUNDERS", 26, 96)
+        retro.text(s, f"{r['blunders']}", 26, 112, PAL["accent"] if r["blunders"] else PAL["text"])
+        retro.text(s, "6+ pts", 70, 112, PAL["text_dim"])
+        retro.dialog_box(s, (164, 88, 140, 42))
+        retro.text(s, "MOST", 174, 96)
+        if r["cats"]:
+            k, v = max(r["cats"].items(), key=lambda kv: kv[1])
+            retro.text(s, f"{review.CATS[k][0]} x{v}", 174, 112)
+        else:
+            retro.text(s, "-", 174, 112, PAL["text_dim"])
+        # 3. waar je verloor
+        retro.dialog_box(s, (16, 136, 288, 42))
+        retro.text(s, "LOSS BY PHASE", 26, 144)
+        ph = r["phases"]
+        worst = max(ph, key=ph.get) if ph else None
+        x = 26
+        for key, lab in (("open", "open"), ("mid", "mid"), ("end", "end")):
+            if key in ph:
+                col = PAL["accent"] if key == worst and ph[key] >= 1.5 else PAL["text"]
+                retro.text(s, f"{lab} {ph[key]:.1f}", x, 160, col)
+            x += 92
+        # acties
+        retro.dialog_box(s, (16, 186, 288, 26))
+        retro.text(s, "A MOMENTS", 26, 195)
+        retro.text_c(s, "START TREND", 186, 195)
+        retro.text_r(s, "B BACK", 296, 195)
+
+
+class MomentScene:
+    """Een van de 3 duurste zetten: bord vóór de zet, rood = jouw zet, groen = beter."""
+
+    def __init__(self, parent, r, size, i):
+        self.parent, self.r, self.size, self.i = parent, r, size, i
+
+    def handle(self, ev):
+        if ev.type != pygame.KEYDOWN:
+            return self
+        n = len(self.r["moments"])
+        if ev.key in B_KEYS:
+            return self.parent
+        if ev.key in (pygame.K_RIGHT, pygame.K_DOWN) + A_KEYS:
+            self.i = (self.i + 1) % n
+        elif ev.key in (pygame.K_LEFT, pygame.K_UP):
+            self.i = (self.i - 1) % n
+        return self
+
+    def draw(self, s):
+        m = self.r["moments"][self.i]
+        n = self.size
+        s.fill(PAL["screen"])
+        s.blit(board_bg(n), (4, 14))
+        c, ox, oy, rr = board_geom(n)
+        b = m["board"]
+        for y in range(n):
+            for x in range(n):
+                if b[y][x]:
+                    retro.stone(s, ox + x * c, oy + y * c, rr, "B" if b[y][x] == 1 else "W")
+        if m.get("prev"):
+            px, py = m["prev"]
+            col = PAL["white_sh"] if b[py][px] == 1 else PAL["black_hi"]
+            pygame.draw.rect(s, col, (ox + px * c - 2, oy + py * c - 2, 5, 5))
+        col_me = "B" if m["t"] % 2 == 0 else "W"
+        if m["played"]:
+            x, y = m["played"]
+            retro.stone(s, ox + x * c, oy + y * c, rr, col_me)
+            pygame.draw.rect(s, PAL["accent"], (ox + x * c - 2, oy + y * c - 2, 5, 5))
+        if m["answer"]:
+            x, y = m["answer"]
+            pygame.draw.circle(s, PAL["green"], (ox + x * c, oy + y * c), rr + 1, 2)
+        # zijpaneel
+        cat = review.CATS.get(m["cat"], ("?", "", ""))
+        retro.dialog_box(s, (224, 14, 92, 34))
+        retro.text(s, f"MOMENT {self.i + 1}/{len(self.r['moments'])}", 230, 20)
+        retro.text(s, f"move {m['t'] + 1}", 230, 34, PAL["text_dim"])
+        retro.dialog_box(s, (224, 52, 92, 34))
+        retro.text_c(s, f"-{max(0, m['lost']):.1f}", 270, 58, PAL["accent"], 16)
+        retro.text_c(s, "points", 270, 76, PAL["text_dim"])
+        retro.dialog_box(s, (224, 90, 92, 70))
+        retro.text(s, cat[0], 230, 96)
+        retro.text(s, cat[1], 230, 112, PAL["text_dim"])
+        retro.text(s, cat[2], 230, 124, PAL["text_dim"])
+        if not m["played"]:
+            retro.text(s, "you passed", 230, 144, PAL["accent"])
+        retro.dialog_box(s, (224, 164, 92, 30))
+        pygame.draw.rect(s, PAL["accent"], (231, 170, 5, 5))
+        retro.text(s, "you", 242, 169, PAL["text_dim"])
+        pygame.draw.circle(s, PAL["green"], (234, 184), 4, 2)
+        retro.text(s, "better", 242, 181, PAL["text_dim"])
+        retro.dialog_box(s, (224, 198, 92, 28))
+        retro.text(s, "<> next", 230, 203, PAL["text_dim"])
+        retro.text(s, "B back", 230, 214, PAL["text_dim"])
+
+
+class TrendScene:
+    """Laatste 10 reviews per bordmaat: staafjes verlies/zet + 2 meest gemaakte fouten."""
+
+    def __init__(self, parent, size=None):
+        self.parent = parent
+        self.size = size if size in BOARD_SIZES else new_size
+
+    def handle(self, ev):
+        if ev.type != pygame.KEYDOWN:
+            return self
+        if ev.key in B_KEYS or ev.key == pygame.K_s:
+            return self.parent
+        if ev.key in (pygame.K_LEFT, pygame.K_RIGHT):
+            i = BOARD_SIZES.index(self.size) + (1 if ev.key == pygame.K_RIGHT else -1)
+            self.size = BOARD_SIZES[i % len(BOARD_SIZES)]
+        return self
+
+    def draw(self, s):
+        s.fill(PAL["screen"])
+        retro.text_c(s, "TREND", W // 2, 10, PAL["box"])
+        retro.text_c(s, f"< {self.size}x{self.size} >  last 10", W // 2, 26, PAL["text_dim"])
+        h = review.history(REVIEWS, self.size, 10)
+        retro.dialog_box(s, (16, 40, 288, 104))
+        retro.text(s, "LOSS PER MOVE", 26, 48)
+        if not h:
+            retro.text_c(s, "no reviews yet", W // 2, 90, PAL["text_dim"])
+        else:
+            top, base, x0 = 8.0, 132, 56
+            for v in (0, 4, 8):
+                y = base - int(v / top * 64)
+                retro.text_r(s, str(v), 46, y - 3, PAL["text_dim"])
+                pygame.draw.line(s, PAL["box_dk"], (52, y), (292, y))
+            w = 22
+            for i, r in enumerate(h):
+                v = min(top, r["loss_per_move"])
+                hgt = max(1, int(v / top * 64))
+                col = PAL["green"] if r.get("won") else PAL["box_dk"]
+                pygame.draw.rect(s, col, (x0 + i * 24, base - hgt, w - 6, hgt))
+            avg = sum(r["loss_per_move"] for r in h) / len(h)
+            retro.text_r(s, f"avg {avg:.1f}", 296, 48, PAL["text_dim"])
+        retro.dialog_box(s, (16, 150, 288, 50))
+        retro.text(s, "MOST COMMON", 26, 158)
+        cats = {}
+        for r in h:
+            for k, v in (r.get("cats") or {}).items():
+                cats[k] = cats.get(k, 0) + v
+        top2 = sorted(cats.items(), key=lambda kv: -kv[1])[:2]
+        for j, (k, v) in enumerate(top2):
+            retro.text(s, f"{review.CATS[k][0]}", 26 + j * 140, 176)
+            retro.text_r(s, f"x{v}", 150 + j * 140, 176, PAL["text_dim"])
+        if not top2:
+            retro.text(s, "-", 26, 176, PAL["text_dim"])
+        retro.text(s, "green = won", 4, 228, PAL["text_dim"])
+        retro.text_r(s, "B back", 316, 228, PAL["text_dim"])
+
 
 
 REMOTE = "/tmp/flipgo-remote"     # dev: bestaat deze map, dan stuurt Claude toetsen + vraagt shots
