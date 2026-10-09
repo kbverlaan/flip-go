@@ -120,20 +120,25 @@ class JudgedEngine:
                 pass
         threading.Thread(target=go, daemon=True).start()
 
-    def fill_missing(self):
-        """Na de pot: ontbrekende stellingen (bv. hervatte pot) alsnog beoordelen."""
+    def fill_missing(self, step=None):
+        """Na de pot: ontbrekende stellingen (bv. hervatte pot) alsnog beoordelen.
+        step() na elke beoordeling (voortgangsbalk)."""
         ev, moves, size, komi = self.evals, list(self.moves), self.size, self.komi
         for t in range(len(moves) + 1):
             if t not in ev and ev is self.evals:          # stoppen als er een nieuwe pot is
                 self._remember(ev, t, self.judge.analyze(moves[:t], size, komi))
+                if step:
+                    step()
         return ev
 
-    def deep(self, t, visits=30, ev=None, moves=None):
+    def deep(self, t, visits=30, ev=None, moves=None, step=None):
         """Nauwkeuriger (meer visits) voor een review-moment: vóór en na zet t."""
         ev = self.evals if ev is None else ev
         moves = list(self.moves) if moves is None else moves
         for u in (t, t + 1):
             self._remember(ev, u, self.judge.analyze(moves[:u], self.size, self.komi, visits=visits))
+            if step:
+                step()
 
     def _lead(self, r, col):
         s = r["rootInfo"]["scoreLead"]          # zwart-perspectief (judge-config)
