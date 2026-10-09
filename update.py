@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 REPO = "kbverlaan/flip-go"
-FILES = ["main.py", "ogs.py", "goban.py", "retro.py", "gtp.py", "judge.py", "review.py", "update.py"]
+FILES = ["main.py", "ogs.py", "goban.py", "retro.py", "gtp.py", "judge.py", "review.py", "analyse.py", "update.py"]
 HERE = Path(__file__).parent
 VERSION_FILE = HERE / "version.txt"
 
