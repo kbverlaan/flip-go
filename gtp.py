@@ -2,9 +2,12 @@
 Engines + netten staan in engines/ naast de code (via flip-scp, niet via OTA).
 Coördinaten: x,y met y=0 boven (zoals goban.py); GTP-rij 1 = onder.
 """
+import json
+import math
 import os
 import subprocess
 import threading
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ENG = os.path.join(HERE, "engines")
@@ -84,7 +87,7 @@ class Engine:
         err.flush()
         self.p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                   stderr=err, text=True, bufsize=1, cwd=ENG)
-        self.size = 0
+        self.size = size if kind == "katago" else 0     # KataGo start al op deze maat
 
     def new_game(self, size, komi, arg=None):
         """-> False als het profiel niet om te zetten is (dan opnieuw starten)."""
@@ -92,6 +95,9 @@ class Engine:
             if not self.cmd(f"kata-set-param humanSLProfile {arg}")[0]:
                 return False
             self.arg = arg
+        if self.kind == "katago" and size != self.size:
+            with _timed(("gpu" if self.gpu else "cpu") + f"-switch{size}"):
+                self.cmd(f"boardsize {size}")       # nieuwe NN-context: 13 s (CPU) tot 27 s (GPU)
         self.size = size
         self.cmd(f"boardsize {size}")
         self.cmd("clear_board")
@@ -151,12 +157,65 @@ def _gpu_ok():
             and os.path.exists(os.path.join(d, "gtp_human1.cfg")))
 
 
+# ---------- laadbalk ----------
+# KataGo meldt in GTP-modus geen voortgang. Op hetzelfde apparaat is de laadtijd per
+# (GPU/CPU, start/wissel, bordmaat) wel vrij constant: de balk loopt op de vorige meting.
+LOADTIMES = os.path.join(HERE, "conf", "loadtimes.json")
+_load = None            # (t0, verwachte duur) zolang er geladen wordt
+
+
+def _loadtimes():
+    try:
+        with open(LOADTIMES) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+class _timed:
+    def __init__(self, key):
+        self.key = key
+
+    def __enter__(self):
+        global _load
+        default = 30.0 if "start" in self.key else 20.0
+        _load = (time.monotonic(), _loadtimes().get(self.key, default))
+
+    def __exit__(self, exc, *_):
+        global _load
+        t0, _ = _load
+        _load = None
+        if exc is None:
+            d = _loadtimes()
+            dt = time.monotonic() - t0
+            d[self.key] = round(dt if self.key not in d else (d[self.key] + dt) / 2, 1)
+            try:
+                os.makedirs(os.path.dirname(LOADTIMES), exist_ok=True)
+                with open(LOADTIMES, "w") as f:
+                    json.dump(d, f)
+            except OSError:
+                pass
+
+
+def load_progress():
+    """-> 0..1 terwijl KataGo laadt of van bordmaat wisselt, anders None. Tot 90% lineair
+    op de verwachte duur; daarna kruipt hij naar 99% en pas 'klaar' sluit hem af."""
+    ld = _load
+    if ld is None:
+        return None
+    el, exp = time.monotonic() - ld[0], max(1.0, ld[1])
+    if el < 0.9 * exp:
+        return el / exp
+    return 0.9 + 0.09 * (1 - math.exp(-(el - 0.9 * exp) / (0.15 * exp)))
+
+
 def _start_human(prof, size):
     """Start + wacht tot geladen; valt bij een GPU-fout één keer terug op de CPU."""
     global _gpu_broken
     e = Engine("katago", prof, size)
     try:
-        e.cmd("name")
+        with _timed(("gpu" if e.gpu else "cpu") + f"-start{size}"):
+            e.cmd("name")
         return e
     except OSError:
         if not e.gpu:
@@ -208,19 +267,36 @@ def get_engine(kind, arg, size, komi):
         return e
 
 
+_want = None            # bordmaat waarop de warme KataGo klaar moet staan
+
+
 def preload(size=9):
-    """KataGo alvast laden (bij openen van OFFLINE), zodat de eerste zet niet wacht."""
+    """KataGo alvast laden (bij openen van OFFLINE) of op de achtergrond naar de gekozen
+    bordmaat omschakelen, zodat de eerste zet niet wacht. Wacht even: snel door de maten
+    bladeren start niet elke maat."""
+    global _want
     if not any(b[1] == "katago" for b in available()):
         return
+    first = _want is None
+    _want = size
+
     def go():
         global _warm
+        if not first:
+            time.sleep(0.8)
+            if _want != size:
+                return
         with _warm_lock:
-            if _warm is None or _warm.p.poll() is not None:
-                try:
-                    first = next(b for b in available() if b[1] == "katago")
-                    _warm = _start_human(_profile(first[2]), size)   # blokkeert tot geladen
-                except OSError:
-                    _warm = None
+            if _want != size:
+                return
+            try:
+                if _warm is None or _warm.p.poll() is not None:
+                    prof = _profile(next(b for b in available() if b[1] == "katago")[2])
+                    _warm = _start_human(prof, size)   # blokkeert tot geladen
+                elif _warm.size != size and size in (9, 13):    # 19x19 niet getuned: niet vooraf
+                    _warm.new_game(size, 6.5)
+            except OSError:
+                _warm = None
     threading.Thread(target=go, daemon=True).start()
 
 

@@ -135,6 +135,16 @@ def device_status():
     return _dev["v"]
 
 
+def load_bar(s, x, y, w):
+    """Laadbalk voor KataGo (zie gtp.load_progress); -> False als er niets laadt."""
+    p = gtp.load_progress()
+    if p is None:
+        return False
+    pygame.draw.rect(s, PAL["box_dk"], (x, y, w, 8), 1)
+    pygame.draw.rect(s, PAL["green"], (x + 2, y + 2, int((w - 4) * p), 4))
+    return True
+
+
 def draw_status(s):
     """Batterij + wifi als pixel-iconen rechtsboven (alleen op het apparaat)."""
     batt, charging, wifi = device_status()
@@ -793,7 +803,9 @@ class GameScene:
         self._plate(s, 52, 2, self.names[1], self.caps[1], playing and self.turn_color == 2)
         retro.dialog_box(s, (224, 198, 92, 28))
         retro.text(s, self.msg[:10], 230, 203)
-        if self.gid and playing and self.menu is None:
+        if self.busy and load_bar(s, 230, 215, 80):
+            pass
+        elif self.gid and playing and self.menu is None:
             retro.text(s, "start menu", 230, 214, PAL["text_dim"])
         # menu tussen plates en berichtvak (Pokemon-pauzemenu)
         if self.menu is not None:
@@ -868,6 +880,7 @@ class OfflineScene:
         elif ev.key in (pygame.K_LEFT, pygame.K_RIGHT):
             i = BOARD_SIZES.index(new_size) + (1 if ev.key == pygame.K_RIGHT else -1)
             set_size(BOARD_SIZES[i % len(BOARD_SIZES)])
+            gtp.preload(new_size)          # warme bot alvast naar deze maat
         elif ev.key in A_KEYS and self.rows:
             kind, bot = self.rows[self.sel]
             if kind == "continue":
@@ -900,7 +913,8 @@ class OfflineScene:
                 retro.text(s, bot[0], 84, y + 6)
         retro.text(s, "B back  START stats", 4, 228, PAL["text_dim"])
         if any(b[1] == "katago" for _, b in self.rows if b) and not gtp.is_warm():
-            retro.text_r(s, "loading bot...", 316, 228, PAL["text_dim"])
+            if not load_bar(s, 236, 228, 80):
+                retro.text_r(s, "loading bot...", 316, 228, PAL["text_dim"])
 
 
 class OfflineGameScene(GameScene):
@@ -921,7 +935,7 @@ class OfflineGameScene(GameScene):
         self.review = None
         self.eng = None
         self.busy = True
-        self.msg = "Loading bot" if bot[1] == "katago" and not gtp.is_warm() else "Loading..."
+        self.msg = "Loading..."          # laadbalk eronder (gtp.load_progress)
         threading.Thread(target=self._start, daemon=True).start()
 
     def _start(self):
@@ -1039,7 +1053,7 @@ class OfflineGameScene(GameScene):
             self._load()
         except OSError as e:          # engine gestorven: opnieuw starten, zetten herspelen
             print("offline: engine lost, restarting:", e)
-            self._snap = {"msg": "Loading bot"}
+            self._snap = {"msg": "Loading..."}
             self._start()
             return
         except Exception as e:
