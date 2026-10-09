@@ -883,7 +883,7 @@ class OfflineGameScene(GameScene):
         self.result = None             # (winner_kleur, 'x points'|'Resignation')
         self.eng = None
         self.busy = True
-        self.msg = "Loading..."
+        self.msg = "Loading bot" if bot[1] == "katago" and not gtp.is_warm() else "Loading..."
         threading.Thread(target=self._start, daemon=True).start()
 
     def _start(self):
@@ -896,7 +896,7 @@ class OfflineGameScene(GameScene):
             self._load()
         except Exception as e:
             print("offline: engine start failed:", e)
-            self._snap = {"msg": "No engine"}
+            self._snap = {"msg": "Bot failed"}
         self.busy = False
 
     def _passes(self):
@@ -968,6 +968,11 @@ class OfflineGameScene(GameScene):
                 self._finish(2, "Resignation")
             self._save()
             self._load()
+        except OSError as e:          # engine gestorven: opnieuw starten, zetten herspelen
+            print("offline: engine lost, restarting:", e)
+            self._snap = {"msg": "Loading bot"}
+            self._start()
+            return
         except Exception as e:
             print("offline:", e)
             self._snap = {"msg": f"{action[0]} failed"[:10]}
