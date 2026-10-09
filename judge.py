@@ -99,33 +99,41 @@ class JudgedEngine:
         self.moves.append([color, self._gtp(x, y)])
         return True
 
-    def _remember(self, t, r):
+    @staticmethod
+    def _remember(ev, t, r):
         infos = r.get("moveInfos") or []
-        self.evals[t] = {"lead": r["rootInfo"]["scoreLead"],
-                         "best": infos[0]["move"] if infos else None}
+        ev[t] = {"lead": r["rootInfo"]["scoreLead"], "best": infos[0]["move"] if infos else None,
+                 "pv": (infos[0].get("pv") or [])[:3] if infos else []}
 
+    # Achtergrondwerk neemt bij de start een momentopname (evals-dict + zetten) en schrijft alleen
+    # daarin: new_game vervangt self.evals, dus een oude thread vervuilt nooit de nieuwe pot.
     def eval_async(self):
         """Beoordeel de stand waarin de mens aan zet is, op de achtergrond (tijdens zijn bedenktijd)."""
-        t, moves = len(self.moves), list(self.moves)
-        if t in self.evals:
+        ev, moves, size, komi = self.evals, list(self.moves), self.size, self.komi
+        t = len(moves)
+        if t in ev:
             return
         def go():
             try:
-                self._remember(t, self.judge.analyze(moves, self.size, self.komi))
+                self._remember(ev, t, self.judge.analyze(moves, size, komi))
             except Exception:
                 pass
         threading.Thread(target=go, daemon=True).start()
 
-    def fill_missing(self, upto=None):
+    def fill_missing(self):
         """Na de pot: ontbrekende stellingen (bv. hervatte pot) alsnog beoordelen."""
-        for t in range((upto or len(self.moves)) + 1):
-            if t not in self.evals:
-                self._remember(t, self.judge.analyze(self.moves[:t], self.size, self.komi))
+        ev, moves, size, komi = self.evals, list(self.moves), self.size, self.komi
+        for t in range(len(moves) + 1):
+            if t not in ev and ev is self.evals:          # stoppen als er een nieuwe pot is
+                self._remember(ev, t, self.judge.analyze(moves[:t], size, komi))
+        return ev
 
-    def deep(self, t, visits=30):
+    def deep(self, t, visits=30, ev=None, moves=None):
         """Nauwkeuriger (meer visits) voor een review-moment: vóór en na zet t."""
+        ev = self.evals if ev is None else ev
+        moves = list(self.moves) if moves is None else moves
         for u in (t, t + 1):
-            self._remember(u, self.judge.analyze(self.moves[:u], self.size, self.komi, visits=visits))
+            self._remember(ev, u, self.judge.analyze(moves[:u], self.size, self.komi, visits=visits))
 
     def _lead(self, r, col):
         s = r["rootInfo"]["scoreLead"]          # zwart-perspectief (judge-config)
@@ -160,7 +168,7 @@ class JudgedEngine:
         th = threading.Thread(target=lambda: pol.update(p=self._policy()))
         th.start()
         root = self.judge.analyze(self.moves, self.size, self.komi)
-        self._remember(len(self.moves), root)
+        self._remember(self.evals, len(self.moves), root)
         t_root = time.monotonic() - t0
         t_pol, checks = 0.0, 0
         known = {m["move"].upper(): self._lead({"rootInfo": m}, color)
