@@ -846,21 +846,21 @@ class OfflineScene:
     def draw(self, s):
         s.fill(PAL["screen"])
         retro.text_c(s, "OFFLINE", W // 2, 14, PAL["box"])
-        retro.text_c(s, f"< {new_size}x{new_size} > chinese - komi 7.5", W // 2, 34,
+        retro.text_c(s, f"< {new_size}x{new_size} > japanese - komi 6.5", W // 2, 34,
                      PAL["text_dim"])
         if not self.rows:
             retro.text_c(s, "no engine installed", W // 2, 100, PAL["text_dim"])
         for i, (kind, bot) in enumerate(self.rows):
-            y = 56 + i * 26
-            retro.dialog_box(s, (64, y, 192, 22))
+            y = 48 + i * 22
+            retro.dialog_box(s, (64, y, 192, 20))
             if i == self.sel:
-                arrow(s, 72, y + 7)
+                arrow(s, 72, y + 6)
             if kind == "continue":
                 sv = self.saved
-                retro.text(s, "CONTINUE", 84, y + 7)
-                retro.text_r(s, f"{sv['size']}x{sv['size']}", 248, y + 7, PAL["text_dim"])
+                retro.text(s, "CONTINUE", 84, y + 6)
+                retro.text_r(s, f"{sv['size']}x{sv['size']}", 248, y + 6, PAL["text_dim"])
             else:
-                retro.text(s, bot[0], 84, y + 7)
+                retro.text(s, bot[0], 84, y + 6)
         retro.text(s, "B back", 4, 228, PAL["text_dim"])
         if any(b[1] == "katago" for _, b in self.rows if b) and not gtp.is_warm():
             retro.text_r(s, "loading bot...", 316, 228, PAL["text_dim"])
@@ -868,7 +868,7 @@ class OfflineScene:
 
 class OfflineGameScene(GameScene):
     """Pot tegen een lokale engine. Jij zwart, bot wit; stand in conf/offline.json."""
-    KOMI = 7.5
+    KOMI = 6.5
 
     def __init__(self, bot, size, moves=None):
         super().__init__(None)
@@ -879,7 +879,7 @@ class OfflineGameScene(GameScene):
         self.cx = self.cy = size // 2
         self.names = ("you", bot[0][:8])
         self.me_id, self.black_id = 1, 1
-        self.komi, self.rules, self.speed = self.KOMI, "chinese", "offline"
+        self.komi, self.rules, self.speed = self.KOMI, "japanese", "offline"
         self.result = None             # (winner_kleur, 'x points'|'Resignation')
         self.eng = None
         self.busy = True
