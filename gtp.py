@@ -50,7 +50,7 @@ class Engine:
     def __init__(self, kind, arg):
         if kind == "gnugo":
             cmd = [os.path.join(ENG, "gnugo"), "--mode", "gtp", "--level", str(arg),
-                   "--chinese-rules"]
+                   "--japanese-rules"]
         else:   # humanlike-net als enig net, 1 visit = zet uit de menselijke policy
             cmd = [os.path.join(ENG, "katago"), "gtp",
                    "-config", os.path.join(ENG, "gtp_human1.cfg"),
@@ -74,6 +74,8 @@ class Engine:
         self.size = size
         self.cmd(f"boardsize {size}")
         self.cmd("clear_board")
+        if self.kind == "katago":
+            self.cmd("kata-set-rules japanese")     # zoals de OGS-potten
         self.cmd(f"komi {komi}")
         return True
 
