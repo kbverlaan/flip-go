@@ -283,7 +283,21 @@ class GamesScene:
 
 
 BOARD_SIZES = (9, 13)
-new_size = 9      # bordmaat voor nieuwe challenges; links/rechts in NEW GAME
+_SIZE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conf", "size.txt")
+try:              # laatst gekozen bordmaat onthouden: KataGo laadt dan meteen op die maat
+    new_size = int(open(_SIZE_FILE).read())
+except (OSError, ValueError):
+    new_size = 9
+
+
+def set_size(n):
+    global new_size
+    new_size = n
+    try:
+        os.makedirs(os.path.dirname(_SIZE_FILE), exist_ok=True)
+        open(_SIZE_FILE, "w").write(str(n))
+    except OSError:
+        pass
 
 
 class NewGameScene:
@@ -316,7 +330,7 @@ class NewGameScene:
             self.sel = max(0, self.sel - 1)
         elif ev.key in (pygame.K_LEFT, pygame.K_RIGHT):
             i = BOARD_SIZES.index(new_size) + (1 if ev.key == pygame.K_RIGHT else -1)
-            new_size = BOARD_SIZES[i % len(BOARD_SIZES)]
+            set_size(BOARD_SIZES[i % len(BOARD_SIZES)])
         elif ev.key in A_KEYS:
             if self.OPTIONS[self.sel][0] == "bots":
                 return BotScene()
@@ -822,7 +836,7 @@ class OfflineScene:
 
     def __init__(self):
         self.saved = load_offline()
-        gtp.preload()
+        gtp.preload(new_size)
         self.rows = ([("continue", None)] if self.saved else []) + \
                     [("bot", b) for b in gtp.available()]
         self.sel = 0
@@ -839,7 +853,7 @@ class OfflineScene:
             self.sel = max(0, self.sel - 1)
         elif ev.key in (pygame.K_LEFT, pygame.K_RIGHT):
             i = BOARD_SIZES.index(new_size) + (1 if ev.key == pygame.K_RIGHT else -1)
-            new_size = BOARD_SIZES[i % len(BOARD_SIZES)]
+            set_size(BOARD_SIZES[i % len(BOARD_SIZES)])
         elif ev.key in A_KEYS and self.rows:
             kind, bot = self.rows[self.sel]
             if kind == "continue":

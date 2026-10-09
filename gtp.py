@@ -53,19 +53,24 @@ class Engine:
     """Eén GTP-proces. KataGo laden kost ~30 s op de Flip: die blijft warm
     (zie get_engine) en krijgt per pot alleen een nieuw bord/profiel."""
 
-    def __init__(self, kind, arg):
+    def __init__(self, kind, arg, size=19):
+        self.gpu = False
         if kind == "gnugo":
             cmd = [os.path.join(ENG, "gnugo"), "--mode", "gtp", "--level", str(arg),
                    "--japanese-rules"]
         else:   # humanlike-net als enig net, 1 visit = zet uit de menselijke policy
-            cmd = [os.path.join(ENG, "katago"), "gtp",
-                   "-config", os.path.join(ENG, "gtp_human1.cfg"),
+            # GPU (OpenCL FP16, Mali): 13x13 1,1 s i.p.v. 1,8 s en ~120 MB minder RAM.
+            # Direct op de bordmaat starten: omschakelen kost 13 s (CPU) tot 27 s (GPU).
+            self.gpu = _gpu_ok()
+            d = os.path.join(ENG, "opencl") if self.gpu else ENG
+            cmd = [os.path.join(d, "katago"), "gtp",
+                   "-config", os.path.join(d, "gtp_human1.cfg"),
                    "-model", os.path.join(ENG, HUMAN_NET),
-                   "-override-config", f"humanSLProfile={arg}"]
+                   "-override-config", f"humanSLProfile={arg},defaultBoardSize={size}"]
         self.kind, self.arg = kind, arg
         self.lock = threading.Lock()
         err = open(os.path.join(ENG, "engine.log"), "a")    # waarom een engine stopt
-        err.write(f"--- start {kind} {arg}\n")
+        err.write(f"--- start {kind} {arg} {'gpu' if self.gpu else 'cpu'}\n")
         err.flush()
         self.p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                   stderr=err, text=True, bufsize=1, cwd=ENG)
@@ -127,6 +132,29 @@ class Engine:
             self.p.kill()
 
 
+_gpu_broken = False     # OpenCL faalde deze sessie: verder op de CPU
+
+
+def _gpu_ok():
+    d = os.path.join(ENG, "opencl")
+    return (not _gpu_broken and os.path.exists(os.path.join(d, "katago"))
+            and os.path.exists(os.path.join(d, "gtp_human1.cfg")))
+
+
+def _start_human(prof, size):
+    """Start + wacht tot geladen; valt bij een GPU-fout één keer terug op de CPU."""
+    global _gpu_broken
+    e = Engine("katago", prof, size)
+    try:
+        e.cmd("name")
+        return e
+    except OSError:
+        if not e.gpu:
+            raise
+        _gpu_broken = True
+        return _start_human(prof, size)
+
+
 _warm = None            # warme KataGo, gedeeld tussen potten
 _warm_lock = threading.Lock()
 _judge = None           # warme b6-scheidsrechter (zie judge.py)
@@ -147,15 +175,15 @@ def get_engine(kind, arg, size, komi):
     prof = _profile(arg)
     with _warm_lock:
         if _warm is None or _warm.p.poll() is not None:
-            _warm = Engine(kind, prof)
+            _warm = _start_human(prof, size)
         try:
             ok = _warm.new_game(size, komi, prof)
         except OSError:         # engine net gestorven (broken pipe): één keer opnieuw
-            _warm = Engine(kind, prof)
+            _warm = _start_human(prof, size)
             ok = _warm.new_game(size, komi)
         if not ok:
             _warm.close()
-            _warm = Engine(kind, prof)
+            _warm = _start_human(prof, size)
             _warm.new_game(size, komi)
         try:
             import judge
@@ -170,7 +198,7 @@ def get_engine(kind, arg, size, komi):
         return e
 
 
-def preload():
+def preload(size=9):
     """KataGo alvast laden (bij openen van OFFLINE), zodat de eerste zet niet wacht."""
     if not any(b[1] == "katago" for b in available()):
         return
@@ -178,8 +206,10 @@ def preload():
         global _warm
         with _warm_lock:
             if _warm is None or _warm.p.poll() is not None:
-                _warm = Engine("katago", _profile(BOTS[0][2]))
-                _warm.cmd("name")       # blokkeert tot het net geladen is
+                try:
+                    _warm = _start_human(_profile(BOTS[0][2]), size)   # blokkeert tot geladen
+                except OSError:
+                    _warm = None
     threading.Thread(target=go, daemon=True).start()
 
 
