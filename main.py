@@ -8,6 +8,7 @@ Besturing (Mac-test = Flip-mapping):
 In een pot: S opent het menu (Pass / Resign / Info / Quit).
 """
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -1387,7 +1388,19 @@ def remote_poll(canvas):
     return evs
 
 
+def power_balanced():
+    """Knulli zet de CPU soms op 'powersaver' (vast 408 MHz): de bots rekenen dan ~4x trager.
+    'balanced' (schedutil) schaalt mee: snel als de bot denkt, zuinig als hij wacht."""
+    pm = "/usr/bin/knulli-power-mode"
+    if os.path.exists(pm):
+        try:
+            subprocess.run([pm, "balanced"], timeout=5, capture_output=True)
+        except Exception as e:
+            print("power mode:", e)
+
+
 def main():
+    power_balanced()
     pygame.init()
     try:
         pygame.mixer.init()
