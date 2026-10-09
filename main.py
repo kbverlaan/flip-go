@@ -126,7 +126,7 @@ def arrow(s, x, y, color=None):
 
 class TitleScene:
     def __init__(self):
-        self.t = 0
+        self.t0 = time.monotonic()
 
     def handle(self, ev):
         if ev.type == pygame.KEYDOWN and ev.key in (pygame.K_RETURN, pygame.K_s, pygame.K_x):
@@ -144,12 +144,11 @@ class TitleScene:
             retro.stone(s, bx + gx * cell, by + gy * cell, 6, c)
         retro.text_c(s, "FLIP GO", W // 2, 16, PAL["box"], 16)
         retro.text_c(s, "an OGS client", W // 2, 38, PAL["text_dim"])
-        if (self.t // 30) % 2 == 0:
+        if int((time.monotonic() - self.t0) * 2) % 2 == 0:     # 0,5 s aan, 0,5 s uit
             retro.text_c(s, "PRESS START", W // 2, 205, PAL["box"])
         retro.text(s, "Y quit", 4, 228, PAL["text_dim"])
         retro.text_r(s, f"v {VERSION}", 316, 228, PAL["text_dim"])
         draw_status(s)
-        self.t += 1
 
 
 class GamesScene:
@@ -160,7 +159,7 @@ class GamesScene:
         self.seeking = []
         self.error = None
         self.sel = 0
-        self.t = 0
+        self.t0 = time.monotonic()
         self.cancelq = None      # challenge-id in bevestiging
         self.stopping = None     # challenge-id die geannuleerd wordt
         self.me_label = None
@@ -241,8 +240,7 @@ class GamesScene:
         retro.text_c(s, "YOUR GAMES", W // 2, 14, PAL["box"])
         draw_status(s)
         if self.games is None:
-            retro.text_c(s, "loading" + "." * ((self.t // 20) % 4), W // 2, 110, PAL["text_dim"])
-            self.t += 1
+            retro.text_c(s, "loading" + "." * (int((time.monotonic() - self.t0) * 3) % 4), W // 2, 110, PAL["text_dim"])
             return
         rows = self._rows()
         off = max(0, min(self.sel - 3, len(rows) - 4))
@@ -282,7 +280,6 @@ class GamesScene:
             retro.text_c(s, self.error, W // 2, 220, PAL["text_dim"])
         elif self.me_label:
             retro.text_c(s, self.me_label, W // 2, 226, PAL["text_dim"])
-        self.t += 1
 
 
 BOARD_SIZES = (9, 13)
@@ -437,7 +434,7 @@ class HistoryScene:
     def __init__(self):
         self.rows = None
         self.sel = 0
-        self.t = 0
+        self.t0 = time.monotonic()
         threading.Thread(target=self._load, daemon=True).start()
 
     def _load(self):
@@ -464,7 +461,7 @@ class HistoryScene:
         s.fill(PAL["screen"])
         retro.text_c(s, "HISTORY", W // 2, 14, PAL["box"])
         if self.rows is None:
-            retro.text_c(s, "loading" + "." * ((self.t // 20) % 4), W // 2, 110, PAL["text_dim"])
+            retro.text_c(s, "loading" + "." * (int((time.monotonic() - self.t0) * 3) % 4), W // 2, 110, PAL["text_dim"])
         elif not self.rows:
             retro.text_c(s, "No finished games.", W // 2, 110, PAL["text_dim"])
         else:
@@ -478,7 +475,6 @@ class HistoryScene:
                            PAL["green"] if r["won"] else PAL["accent"])
                 retro.text(s, f"vs {r['opp'][:15]}", 76, y + 9)
                 retro.text_r(s, r["result"], 296, y + 9, PAL["text_dim"])
-        self.t += 1
 
 
 class GameScene:
@@ -491,7 +487,7 @@ class GameScene:
         self.back = back or GamesScene
         self.size = 9
         self.cx = self.cy = 4
-        self.t = 0
+        self._polled = time.monotonic()   # laatste poll-moment
         self.board = [[0] * 9 for _ in range(9)]
         self.caps = (0, 0)
         self.last = None
@@ -802,11 +798,12 @@ class GameScene:
             retro.text_c(s, "COUNTING", 270, 112)
             retro.text_c(s, "A accept", 270, 132)
             retro.text_c(s, "B games", 270, 156, PAL["text_dim"])
-        poll = 180 if self.speed in ("live", "blitz") else 1800
-        if (self.gid and self.t and self.t % poll == 0 and not self._loading and
-                (self.phase == "stone removal" or (playing and not self.my_turn))):
-            threading.Thread(target=self._load, daemon=True).start()
-        self.t += 1
+        poll = 3 if self.speed in ("live", "blitz") else 30    # seconden
+        if time.monotonic() - self._polled >= poll:
+            self._polled = time.monotonic()
+            if (self.gid and not self._loading and
+                    (self.phase == "stone removal" or (playing and not self.my_turn))):
+                threading.Thread(target=self._load, daemon=True).start()
 
 
 SAVE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conf", "offline.json")
@@ -1043,7 +1040,6 @@ def main():
         game.menu = 1
         for name, scene in (("title", TitleScene()), ("game", game),
                             ("newgame", NewGameScene())):
-            scene.t = 0
             scene.draw(canvas)
             pygame.image.save(pygame.transform.scale(canvas, (W * 2, H * 2)),
                               f"out/{name}.png")
@@ -1051,6 +1047,7 @@ def main():
         return
     scene = TitleScene()
     clock = pygame.time.Clock()
+    last_frame, fresh, last_input = None, 0, 0.0
     while True:
         remote = remote_poll(canvas) if os.path.isdir(REMOTE) else []
         for ev in pygame.event.get() + remote:
@@ -1061,6 +1058,8 @@ def main():
                 j.init()
                 print("pad: joystick added:", j.get_name())
             ev = pad_translate(ev) or ev
+            if ev.type == pygame.KEYDOWN:
+                last_input = time.monotonic()
             if ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
                 if isinstance(scene, TitleScene):
                     return
@@ -1071,10 +1070,20 @@ def main():
             scene.goto = None
             scene = nxt
         scene.draw(canvas)
-        pygame.transform.scale(canvas, win.get_size(), win)
-        pygame.display.flip()
-        # bot denkt / laadt: lage fps laat de CPU aan de engine (en spaart accu)
-        clock.tick(15 if getattr(scene, "busy", False) else 60)
+        # alleen schalen + flippen als het canvas veranderde (2x: dubbele buffer)
+        frame = canvas.get_buffer().raw
+        if frame != last_frame:
+            last_frame, fresh = frame, 2
+        if fresh:
+            fresh -= 1
+            pygame.transform.scale(canvas, win.get_size(), win)
+            pygame.display.flip()
+        # 60 fps vlak na input; rust 20 fps (spaart accu, achtergrond-updates
+        # binnen 50 ms); bot denkt / laadt: 15 fps laat de CPU aan de engine
+        if getattr(scene, "busy", False):
+            clock.tick(15)
+        else:
+            clock.tick(60 if time.monotonic() - last_input < 1 else 20)
 
 
 if __name__ == "__main__":
