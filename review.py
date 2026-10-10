@@ -7,6 +7,7 @@ MiniGo-taxonomie (app.py _classify_mistake) plus 'Passed'. Puur Python: testbaar
 """
 import calendar
 import json
+import math
 import os
 import time
 
@@ -29,6 +30,24 @@ VERSION = 3       # opslagformaat reviews.jsonl (v3: per zet, beide kleuren)
 # Zetklassen naar chess.com/ogs-review (verlies in punten): (sleutel, label, symbool, max-verlies)
 CLASSES = (("best", "Best", "", 0.3), ("good", "Good", "", 1.5), ("inacc", "Inaccuracy", "?!", 3.0),
            ("mistake", "Mistake", "?", 6.0), ("blunder", "Blunder", "??", 1e9))
+
+
+# Accuracy (zoals schaaksites; hoger = beter): per eigen zet 100 * e^(-verlies / ACC_K),
+# gemiddeld over de pot. 0 pt = 100%, 1,5 (grens Good) ~74%, 3 ~55%, 6 (Blunder) ~30%.
+ACC_K = 5.0
+
+
+def move_acc(lost):
+    return 100.0 * math.exp(-max(0.0, lost) / ACC_K)
+
+
+def accuracy(entry):
+    """Accuracy van een opgeslagen review; oude regels uit hun verlies per zet ('mine')."""
+    if entry.get("accuracy") is not None:
+        return entry["accuracy"]
+    lost = [m[1] for m in entry.get("mine") or []] or \
+           [r["lost"] for r in entry.get("rows") or [] if r["col"] == entry.get("human", 1)]
+    return round(sum(move_acc(x) for x in lost) / len(lost), 1) if lost else None
 
 
 def move_class(lost, played_is_best=False):
@@ -160,6 +179,7 @@ def compute(size, moves, evals, human=1, deep=None):
     return {
         "v": VERSION, "moves": len(moves), "rows": rows,
         "loss_per_move": loss(mine),
+        "accuracy": round(sum(move_acc(r["lost"]) for r in mine) / len(mine), 1),
         "phases": {ph: loss([r for r in mine if r["phase"] == ph]) for ph in ("open", "mid", "end")
                    if any(r["phase"] == ph for r in mine)},
         "me": counts(mine), "opp": counts([r for r in rows if r["col"] != human]),

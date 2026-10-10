@@ -104,3 +104,33 @@ def _stone_sprite(r, color):
 def stone(surf, px, py, r, color):
     """Pixel-steen met 1px outline en glimlicht."""
     surf.blit(_stone_sprite(r, color), (px - r, py - r))
+
+
+# ---------- knoppen-hints met getekende pijltjes (het font heeft er geen) ----------
+_ARROWS = {"{l}": "l", "{r}": "r", "{u}": "u", "{d}": "d"}
+
+
+def _arrow(surf, x, y, d, color):
+    """Pijltje van 7x7 px op de tekstregel (y = bovenkant van de tekst)."""
+    pts = {"u": [(x + 3, y), (x, y + 6), (x + 6, y + 6)],
+           "d": [(x, y + 1), (x + 6, y + 1), (x + 3, y + 7)],
+           "l": [(x, y + 3), (x + 6, y), (x + 6, y + 6)],
+           "r": [(x, y), (x, y + 6), (x + 6, y + 3)]}[d]
+    pygame.draw.polygon(surf, color, pts)
+
+
+def hint(surf, s, x, y, color=None, align="l"):
+    """Tekst met {l} {r} {u} {d} als getekende pijltjes; align l/c/r t.o.v. x."""
+    import re
+    color = color or PAL["text"]
+    parts = [p for p in re.split(r"(\{[lrud]\})", s) if p]
+    w = sum(8 if p in _ARROWS else font(8).size(p)[0] for p in parts)
+    x = x - w // 2 if align == "c" else x - w if align == "r" else x
+    for p in parts:
+        if p in _ARROWS:
+            _arrow(surf, x, y, _ARROWS[p], color)
+            x += 8
+        else:
+            text(surf, p, x, y, color)
+            x += font(8).size(p)[0]
+
