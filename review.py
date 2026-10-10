@@ -50,6 +50,19 @@ def accuracy(entry):
     return round(sum(move_acc(x) for x in lost) / len(lost), 1) if lost else None
 
 
+def moves_of(entry):
+    """Eigen zetten van een review als (verlies, klasse, fase): uit 'mine' of uit 'rows'."""
+    if entry.get("mine"):
+        return [(m[1], m[2], m[4]) for m in entry["mine"]]
+    h = entry.get("human", 1)
+    return [(r["lost"], r["cls"], r["phase"]) for r in entry.get("rows") or [] if r["col"] == h]
+
+
+def phase_acc(entry, ph):
+    lost = [x for x, _, p in moves_of(entry) if p == ph]
+    return sum(move_acc(x) for x in lost) / len(lost) if lost else None
+
+
 def move_class(lost, played_is_best=False):
     if played_is_best:
         return "best"
