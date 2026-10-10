@@ -586,6 +586,8 @@ class HistoryScene:
             return GamesScene()
         if ev.key == pygame.K_s:
             return StatsScene(self)
+        if ev.key == X_KEY:
+            toggle_view()
         rows = self.rows or []
         if ev.key == pygame.K_DOWN and rows:
             self.sel = min(len(rows) - 1, self.sel + 1)
@@ -648,7 +650,8 @@ class HistoryScene:
             st = analyse.worker.status.get(r.get("id")) if r.get("src") == "ogs" else None
             if r["key"] in done:
                 v = lpm.get(r["key"])
-                retro.text_r(s, f"{-v[0]:.1f} {v[1]:.0f}%" if v and v[1] is not None else "ok", 304, y + 8)
+                txt = (f"{v[1]:.0f}%" if view_pct and v[1] is not None else f"{v[0]:.1f}/mv") if v else "ok"
+                retro.text_r(s, txt, 304, y + 8)
             elif isinstance(st, float):
                 bar(s, 234, y + 8, 70, st)
             elif st == "queued":
@@ -657,7 +660,7 @@ class HistoryScene:
                 retro.text_r(s, st[:9], 304, y + 8, PAL["text_dim"])
             else:
                 retro.text_r(s, r.get("result", "")[:9], 304, y + 8, PAL["text_dim"])
-        retro.text(s, "A review  START stats", 4, 228, PAL["text_dim"])
+        retro.text(s, "A review START stats X " + ("pts" if view_pct else "%"), 4, 228, PAL["text_dim"])
         if self.offline:
             retro.text_r(s, "no wifi", 316, 228, PAL["accent"])
         else:
@@ -1220,6 +1223,22 @@ class OfflineGameScene(GameScene):
 
 REVIEWS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conf", "reviews.jsonl")
 TINT_GOOD, TINT_BAD = (214, 232, 204), (240, 214, 206)     # vlak onder de scorelijn
+X_KEY = pygame.K_r                 # knop X: overal wisselen tussen punten en procenten
+_VIEW_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conf", "view.txt")
+try:
+    view_pct = open(_VIEW_FILE).read().strip() == "pct"
+except OSError:
+    view_pct = False
+
+
+def toggle_view():
+    global view_pct
+    view_pct = not view_pct
+    try:
+        with open(_VIEW_FILE, "w") as f:
+            f.write("pct" if view_pct else "pts")
+    except OSError:
+        pass
 CLS_COL = {"best": "green", "good": "text_dim", "inacc": "yellow", "mistake": "orange", "blunder": "accent"}
 
 
@@ -1268,6 +1287,8 @@ class GameReviewScene:
             return WalkScene(self, r, self.game.size)
         if ev.key == pygame.K_s:
             return StatsScene(self, self.game.size)
+        if ev.key == X_KEY:
+            toggle_view()
         return self
 
     def draw(self, s):
@@ -1277,6 +1298,7 @@ class GameReviewScene:
         opp = "opp" if isinstance(g, PastGame) and g.row.get("src") == "ogs" else "bot"
         res = "won" if g.result and g.result[0] == human else "lost"
         retro.text_c(s, "REVIEW", W // 2, 6, PAL["box"])
+        retro.text_r(s, "X " + ("pts" if view_pct else "%"), 316, 6, PAL["text_dim"])
         retro.text_c(s, f"vs {g.bot[0]}  {g.size}x{g.size}  {res}", W // 2, 20, PAL["text_dim"])
         if r is None or r.get("error"):
             retro.text_c(s, r["error"] if r else "analysing", W // 2, 110, PAL["text_dim"])
@@ -1309,18 +1331,20 @@ class GameReviewScene:
         # zetklassen jij | bot
         retro.dialog_box(s, (8, 94, 150, 96))
         retro.text(s, "MOVES", 14, 100)
-        retro.text_r(s, "you", 114, 100, PAL["text_dim"])
-        retro.text_r(s, opp, 152, 100, PAL["text_dim"])
+        retro.text_r(s, "you", 121, 100, PAL["text_dim"])
+        retro.text_r(s, opp, 154, 100, PAL["text_dim"])
         for i, (k, lab, sym, _) in enumerate(review.CLASSES):
             y = 116 + i * 14
             col = PAL["text"] if k == "good" else PAL[CLS_COL[k]]
             retro.text(s, (("Inacc" if k == "inacc" else lab) + " " + sym).strip(), 14, y, col)
-            retro.text_r(s, str(r["me"].get(k, 0)), 114, y)
-            retro.text_r(s, str(r["opp"].get(k, 0)), 152, y, PAL["text_dim"])
+            for side, xr, col in (("me", 121, PAL["text"]), ("opp", 154, PAL["text_dim"])):
+                v = r[side].get(k, 0)
+                retro.text_r(s, f"{100 * v / max(1, sum(r[side].values())):.0f}%" if view_pct else str(v),
+                             xr, y, col)
         # verlies/zet + fouttypes
         retro.dialog_box(s, (162, 94, 150, 96))
-        retro.text(s, "PTS/MOVE", 168, 100)
-        retro.text_r(s, f"{-r['loss_per_move']:.1f}", 306, 100, PAL["accent"])
+        retro.text(s, "LOSS/MOVE", 168, 100)
+        retro.text_r(s, f"{r['loss_per_move']:.1f}", 306, 100)
         retro.text(s, "ACCURACY", 168, 114)
         retro.text_r(s, f"{review.accuracy(r):.0f}%", 306, 114)
         retro.text(s, "TYPES", 168, 130)
@@ -1330,7 +1354,8 @@ class GameReviewScene:
                 types[c] = types.get(c, 0) + v
         for i, (c, v) in enumerate(sorted(types.items(), key=lambda kv: -kv[1])[:3]):
             retro.text(s, review.CATS.get(c, (c,))[0], 168, 144 + i * 14)
-            retro.text_r(s, f"x{v}", 306, 144 + i * 14, PAL["text_dim"])
+            retro.text_r(s, f"{100 * v / sum(types.values()):.0f}%" if view_pct else f"x{v}", 306, 144 + i * 14,
+                         PAL["text_dim"])
         if not types:
             retro.text(s, "no mistakes", 168, 144, PAL["text_dim"])
         retro.dialog_box(s, (8, 196, 304, 22))
@@ -1462,7 +1487,6 @@ class StatsScene:
         self.sizes = tuple(sorted(have | set(BOARD_SIZES)))
         self.size = size if size in self.sizes else new_size
         self.src = 0
-        self.acc = False               # trend: punten/zet of accuracy (A wisselt)
 
     def handle(self, ev):
         if ev.type != pygame.KEYDOWN:
@@ -1474,8 +1498,8 @@ class StatsScene:
             self.size = self.sizes[i % len(self.sizes)]
         elif ev.key in (pygame.K_UP, pygame.K_DOWN):
             self.src = (self.src + (1 if ev.key == pygame.K_DOWN else -1)) % len(self.SRC)
-        elif ev.key in A_KEYS:
-            self.acc = not self.acc
+        elif ev.key == X_KEY:
+            toggle_view()
         return self
 
     def draw(self, s):
@@ -1490,21 +1514,24 @@ class StatsScene:
             retro.text(s, "B back", 4, 228, PAL["text_dim"])
             return
         mean = lambda v: sum(v) / len(v) if v else None
-        # 1. trend: punten/zet (negatief) of accuracy; omhoog = beter; stip = pot, lijn = gem. 5
+        pct = view_pct
+        # 1. trend: verlies/zet (0 boven) of accuracy; omhoog = beter; stip = pot, lijn = gem. 5
         retro.dialog_box(s, (8, 32, 304, 60))
-        if self.acc:
+        if pct:
             pairs = [(review.accuracy(r), r) for r in h]
-            pairs, lo, hi, ticks = [p for p in pairs if p[0] is not None] or [(0, {})], 0, 100, (100, 50, 0)
+            pairs = [p for p in pairs if p[0] is not None] or [(0, {})]
+            ticks, ytop, ybot = (100, 50, 0), 100, 0
             retro.text(s, "ACCURACY", 14, 36)
         else:
-            pairs, lo, hi, ticks = [(-r["loss_per_move"], r) for r in h], -8, 0, (0, -4, -8)
-            retro.text(s, "PTS/MOVE", 14, 36)
+            pairs = [(r["loss_per_move"], r) for r in h]
+            ticks, ytop, ybot = (0, 4, 8), 0, 8
+            retro.text(s, "LOSS/MOVE", 14, 36)
         vals, hs = [p[0] for p in pairs], [p[1] for p in pairs]
         roll = [mean(vals[max(0, i - 4):i + 1]) for i in range(len(vals))]
-        fmt = (lambda v: f"{v:.0f}%") if self.acc else (lambda v: f"{v:.1f}")
+        fmt = (lambda v: f"{v:.0f}%") if pct else (lambda v: f"{v:.1f}")
         retro.text_r(s, f"last {fmt(vals[-1])}  avg5 {fmt(roll[-1])}", 306, 36, PAL["text_dim"])
         x0, x1, top, bot = 40, 304, 52, 84
-        y = lambda v: bot - int((max(lo, min(hi, v)) - lo) / (hi - lo) * (bot - top))
+        y = lambda v: top + int((min(max(v, min(ytop, ybot)), max(ytop, ybot)) - ytop) / (ybot - ytop) * (bot - top))
         for t in ticks:
             retro.text_r(s, str(t), 34, y(t) - 3, PAL["text_dim"])
             for xx in range(x0, x1, 6):
@@ -1514,30 +1541,39 @@ class StatsScene:
             pygame.draw.rect(s, PAL["green"] if r.get("won") else PAL["box_dk"], (X(i) - 1, y(v) - 1, 3, 3))
         if len(vals) > 1:
             pygame.draw.lines(s, PAL["text"], False, [(X(i), y(v)) for i, v in enumerate(roll)], 2)
-        # 2. per fase: laatste 5 vs de 5 daarvoor
+        # 2. per fase: laatste 5 vs de 5 daarvoor (groen = beter)
         retro.dialog_box(s, (8, 96, 150, 64))
         retro.text(s, "BY PHASE", 14, 102)
         if len(h) >= 10:
             retro.text_r(s, "vs prev", 152, 102, PAL["text_dim"])
-        for i, (ph, lab) in enumerate((("open", "open"), ("mid", "mid"), ("end", "end"))):
-            series = [-r["phases"][ph] for r in h if r.get("phases", {}).get(ph) is not None]
+        for i, ph in enumerate(("open", "mid", "end")):
+            if pct:
+                series = [v for v in (review.phase_acc(r, ph) for r in h) if v is not None]
+            else:
+                series = [r["phases"][ph] for r in h if r.get("phases", {}).get(ph) is not None]
             now, before = mean(series[-5:]), mean(series[-10:-5])
-            y = 116 + i * 14
-            retro.text(s, lab, 14, y)
+            yy = 116 + i * 14
+            retro.text(s, ph, 14, yy)
             if now is not None:
-                retro.text_r(s, f"{now:.1f}", 96, y)
+                retro.text_r(s, f"{now:.0f}%" if pct else f"{now:.1f}", 96, yy)
                 if before is not None and len(h) >= 10:
-                    d = now - before            # + = minder punten weggegeven = beter
-                    retro.text_r(s, f"{d:+.1f}", 152, y, PAL["green"] if d > 0.2 else
-                                 PAL["accent"] if d < -0.2 else PAL["text_dim"])
-        # 3. fouten per pot
+                    d = now - before
+                    better = d > 1 if pct else d < -0.2
+                    worse = d < -1 if pct else d > 0.2
+                    retro.text_r(s, f"{d:+.0f}" if pct else f"{d:+.1f}", 152, yy,
+                                 PAL["green"] if better else PAL["accent"] if worse else PAL["text_dim"])
+        # 3. fouten per pot (aantal) of als deel van je zetten (%)
         retro.dialog_box(s, (162, 96, 150, 64))
-        retro.text(s, "PER GAME", 168, 102)
+        retro.text(s, "PER GAME" if not pct else "OF MOVES", 168, 102)
         for i, k in enumerate(("blunder", "mistake", "inacc")):
             lab, sym = next((l, sy) for kk, l, sy, _ in review.CLASSES if kk == k)
-            v = mean([r["me"].get(k, 0) for r in h])
+            if pct:
+                tot = sum(sum(r["me"].values()) for r in h)
+                txt = f"{100 * sum(r['me'].get(k, 0) for r in h) / max(1, tot):.0f}%"
+            else:
+                txt = f"{mean([r['me'].get(k, 0) for r in h]):.1f}"
             retro.text(s, (lab[:7 if k != "inacc" else 5] + " " + sym).strip(), 168, 116 + i * 14, PAL[CLS_COL[k]])
-            retro.text_r(s, f"{v:.1f}", 306, 116 + i * 14)
+            retro.text_r(s, txt, 306, 116 + i * 14)
         # 4. meest gemaakte typen
         retro.dialog_box(s, (8, 164, 304, 54))
         for j, (k, title) in enumerate((("blunder", "BLUNDERS"), ("mistake", "MISTAKES"))):
@@ -1547,12 +1583,13 @@ class StatsScene:
                     tot[c] = tot.get(c, 0) + v
             x = 14 + j * 152
             retro.text(s, title, x, 170, PAL[CLS_COL[k]])
+            n = sum(tot.values())
             for i, (c, v) in enumerate(sorted(tot.items(), key=lambda kv: -kv[1])[:2]):
                 retro.text(s, review.CATS.get(c, (c,))[0], x, 186 + i * 14)
-                retro.text_r(s, f"x{v}", x + 142, 186 + i * 14, PAL["text_dim"])
+                retro.text_r(s, f"{100 * v / n:.0f}%" if pct else f"x{v}", x + 142, 186 + i * 14, PAL["text_dim"])
             if not tot:
                 retro.text(s, "-", x, 186, PAL["text_dim"])
-        retro.hint(s, "{l}{r} board {u}{d} src A " + ("pts" if self.acc else "acc"), 4, 228, PAL["text_dim"])
+        retro.hint(s, "{l}{r} board {u}{d} src X " + ("pts" if pct else "%"), 4, 228, PAL["text_dim"])
         pygame.draw.rect(s, PAL["green"], (206, 230, 3, 3))
         retro.text(s, "won", 214, 228, PAL["text_dim"])
         retro.text_r(s, "B back", 316, 228, PAL["text_dim"])
