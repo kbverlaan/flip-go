@@ -64,16 +64,41 @@ def done_keys():
 
 
 def local_games():
-    """Offline potten met volledige review, nieuwste eerst (voor de History-lijst)."""
+    """Alle potten met volledige review (offline én geanalyseerde OGS), voor de History-lijst:
+    zo blijven ze zichtbaar zonder wifi."""
     out = []
     for key in done_keys():
-        if key.startswith("off-"):
-            r = load(key)
-            if r:
-                out.append({"key": key, "src": "off", "opp": r.get("bot", "?"), "won": r.get("won"),
-                            "size": r.get("size"), "ts": r.get("ts", 0),
-                            "result": f"{r.get('loss_per_move', 0):.1f}/mv"})
+        r = load(key)
+        if r:
+            g = {"key": key, "src": r.get("src", "off"), "opp": r.get("bot", "?"), "won": r.get("won"),
+                 "size": r.get("size"), "ts": r.get("ts", 0), "result": ""}
+            if g["src"] == "ogs":
+                g["id"] = r.get("gid")
+            out.append(g)
     return out
+
+
+HIST_CACHE = os.path.join(CONF, "ogs_history.json")
+
+
+def cache_history(rows):
+    """OGS-potlijst lokaal bewaren (samengevoegd met wat er al was)."""
+    old = {g["key"]: g for g in cached_history()}
+    old.update({g["key"]: g for g in rows})
+    try:
+        with open(HIST_CACHE + ".tmp", "w") as f:
+            json.dump(list(old.values()), f)
+        os.replace(HIST_CACHE + ".tmp", HIST_CACHE)
+    except OSError:
+        pass
+
+
+def cached_history():
+    try:
+        with open(HIST_CACHE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return []
 
 
 # ---------- engine ----------
