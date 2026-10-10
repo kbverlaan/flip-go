@@ -6,6 +6,7 @@ in conf/github_token.txt. Public repo: geen token nodig.
 Assets (geluid/font) reizen niet mee via OTA — die wijzigen zelden en
 gaan via de SD-kaart.
 """
+import ast
 import sys
 from pathlib import Path
 
@@ -42,12 +43,21 @@ def main():
         print("flip-go up-to-date", sha[:8])
         return
     print("flip-go: updating to", sha[:8])
-    new = {}
-    for f in FILES:
+    def get(f):
         rr = requests.get(f"https://raw.githubusercontent.com/{REPO}/{sha}/{f}",
                           headers=h, timeout=10)
         rr.raise_for_status()
-        new[f] = rr.content
+        return rr.content
+    # De bestandslijst uit de NIEUWE update.py: anders komt een nieuw bestand pas één
+    # update later mee, terwijl de nieuwe main.py het al importeert (crash bij start).
+    new = {"update.py": get("update.py")}
+    files = FILES
+    for node in ast.parse(new["update.py"]).body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "FILES" for t in node.targets):
+            files = ast.literal_eval(node.value)
+    for f in dict.fromkeys(list(files) + FILES):
+        if f not in new:
+            new[f] = get(f)
     for f, data in new.items():      # pas schrijven als alles compleet binnen is
         (HERE / f).write_bytes(data)
     VERSION_FILE.write_text(sha)
