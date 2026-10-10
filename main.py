@@ -540,6 +540,7 @@ class HistoryScene:
 
     def __init__(self):
         self.ogs, self.rows, self.sel, self.page, self.more = None, None, 0, 0, True
+        self.offline = False
         self.t0 = time.monotonic()
         self._fetching = False
         self._fetch()
@@ -553,22 +554,27 @@ class HistoryScene:
                 got = ogs.my_history(self.PAGE, self.page + 1)
                 self.page += 1
                 self.more = len(got) == self.PAGE
-            except Exception as e:
+            except Exception as e:             # geen wifi/OGS: lokaal bewaarde lijst
                 print("history:", e)
-                got, self.more = [], False
+                got, self.more, self.offline = [], False, True
             for g in got:
                 g.update(key=f"ogs-{g['id']}", src="ogs", ts=analyse._iso_ts(g.get("ended")))
-            self.ogs = (self.ogs or []) + got
+            if got:
+                analyse.cache_history(got)
+            self.ogs = (self.ogs or []) + got if not self.offline else analyse.cached_history()
             self._merge()
             self._fetching = False
         threading.Thread(target=go, daemon=True).start()
 
     def _merge(self):
-        games = (self.ogs or []) + analyse.local_games()
-        games.sort(key=lambda g: -(g.get("ts") or 0))
+        games = {g["key"]: g for g in analyse.local_games()}
+        games.update({g["key"]: g for g in self.ogs or []})     # OGS-regel heeft de uitslag
+        games = sorted(games.values(), key=lambda g: -(g.get("ts") or 0))
         self.rows = [{"key": "all"}] + games
 
     def _todo(self):
+        if self.offline:
+            return []
         done = analyse.done_keys()
         return [g["id"] for g in self.rows or [] if g.get("src") == "ogs" and g["key"] not in done
                 and g.get("size") in (9, 13, 19)]
@@ -630,7 +636,8 @@ class HistoryScene:
                     if isinstance(p, float):
                         bar(s, 150, y + 8, 70, p)
                 else:
-                    retro.text_r(s, f"{todo} new" if todo else "all done", 304, y + 8, PAL["text_dim"])
+                    msg = "needs wifi" if self.offline else (f"{todo} new" if todo else "all done")
+                    retro.text_r(s, msg, 304, y + 8, PAL["text_dim"])
                 continue
             retro.text(s, "won " if r.get("won") else "lost", 28, y + 8,
                        PAL["green"] if r.get("won") else PAL["accent"])
@@ -650,7 +657,10 @@ class HistoryScene:
             else:
                 retro.text_r(s, r.get("result", "")[:9], 304, y + 8, PAL["text_dim"])
         retro.text(s, "A review  START stats", 4, 228, PAL["text_dim"])
-        retro.text_r(s, "* offline", 316, 228, PAL["text_dim"])
+        if self.offline:
+            retro.text_r(s, "no wifi", 316, 228, PAL["accent"])
+        else:
+            retro.text_r(s, "* offline", 316, 228, PAL["text_dim"])
 
 
 class GameScene:
