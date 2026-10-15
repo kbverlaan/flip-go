@@ -21,6 +21,7 @@ CATS = {   # label + twee regels uitleg, elk <= 10 tekens (past in het zijpaneel
     "ignored": ("Ignored", "Answer the", "threat"),
     "cut": ("Cut/link", "Groups got", "cut apart"),
     "endgame": ("Endgame", "Boundary", "move"),
+    "respond": ("Respond", "Answer", "their move"),
     "bigpoint": ("Big point", "Bigger", "elsewhere"),
     "local": ("Local", "Better", "shape here"),
     "passed": ("Passed", "Passed", "too early"),
@@ -145,7 +146,10 @@ def classify(board, n, played, answer, lost, prev, col):
         gs = _groups_adj(board, bx, by, c)
         if len(gs) >= 2 and any(l <= 3 for _, l in gs):
             return "cut"
-    # 6. groot punt elders
+    # 6. niet geantwoord: de betere zet ligt bij de laatste zet van de tegenstander, jij speelde ver weg
+    if dist(played, answer) >= far and dist(prev, answer) < far:
+        return "respond"
+    # 7. groot punt elders
     if dist(played, answer) >= far and dist(prev, answer) >= far:
         return "bigpoint"
     return "local"
