@@ -263,7 +263,7 @@ class GamesScene:
             kind, data = rows[self.sel]
             if kind == "offline":
                 sv, bot = data
-                return OfflineGameScene(bot, sv["size"], sv["moves"])
+                return OfflineGameScene(bot, sv["size"], sv["moves"], sv.get("handicap", 0))
             if kind == "game":
                 return GameScene(data["id"])
             if kind == "seek":
@@ -1640,7 +1640,7 @@ class StatsScene:
 REMOTE = "/tmp/flipgo-remote"     # dev: bestaat deze map, dan stuurt Claude toetsen + vraagt shots
 REMOTE_KEYS = {"A": pygame.K_RETURN, "B": pygame.K_BACKSPACE, "START": pygame.K_s,
                "UP": pygame.K_UP, "DOWN": pygame.K_DOWN, "LEFT": pygame.K_LEFT,
-               "RIGHT": pygame.K_RIGHT}
+               "RIGHT": pygame.K_RIGHT, "X": pygame.K_r, "Y": pygame.K_ESCAPE}
 
 
 def remote_poll(canvas):
