@@ -150,7 +150,27 @@ def classify(board, n, played, answer, lost, prev, col):
         return "bigpoint"
     return "local"
 
-def compute(size, moves, evals, human=1, deep=None):
+def color_at(t, handicap=0):
+    """Kleur van zet t. Handicap (OGS-vorm): de eerste N zetten zijn de zwarte stenen, dan begint wit."""
+    if handicap:
+        return 1 if t < handicap else (2 if (t - handicap) % 2 == 0 else 1)
+    return 1 if t % 2 == 0 else 2
+
+
+HCAP_PTS = {2: "TR BL", 3: "TR BL BR", 4: "TR BL BR TL", 5: "TR BL BR TL C", 6: "TR BL BR TL L R",
+            7: "TR BL BR TL L R C", 8: "TR BL BR TL L R T B", 9: "TR BL BR TL L R T B C"}
+
+
+def handicap_stones(size, n):
+    """Vaste handicappunten (sterpunten), y=0 boven. -> [(x,y)]"""
+    lo = 2 if size <= 9 else 3
+    hi, mid = size - 1 - lo, size // 2
+    at = {"TR": (hi, lo), "BL": (lo, hi), "BR": (hi, hi), "TL": (lo, lo), "C": (mid, mid),
+          "L": (lo, mid), "R": (hi, mid), "T": (mid, lo), "B": (mid, hi)}
+    return [at[k] for k in HCAP_PTS[n].split()] if n in HCAP_PTS else []
+
+
+def compute(size, moves, evals, human=1, deep=None, handicap=0):
     """-> dict met per-zet-analyse (beide kleuren) + samenvatting, of None bij te weinig data.
     evals[t] = stand vóór zet t (8 visits, uniform): {"lead": scoreLead zwart, "best": GTP, "pv": [...]}
     deep[t] = zelfde, nauwkeuriger (30 visits) voor opnieuw doorgerekende eigen fouten. Een verlies
@@ -159,8 +179,11 @@ def compute(size, moves, evals, human=1, deep=None):
     board = [[0] * size for _ in range(size)]
     rows, prev = [], None
     for t, (x, y) in enumerate(moves):
-        col = 1 if t % 2 == 0 else 2
+        col = color_at(t, handicap)
         played = None if x < 0 else (x, y)
+        if t < handicap:                       # beginstenen: geen zet om te beoordelen
+            goban.apply_move(board, x, y, 1)
+            continue
         src = deep if (col == human and t in deep and t + 1 in deep) else evals
         if t in src and t + 1 in src:
             sign = 1 if col == 1 else -1
@@ -176,7 +199,7 @@ def compute(size, moves, evals, human=1, deep=None):
                     "t": t, "col": col, "lost": round(lost, 2), "cls": cls,
                     "cat": classify([r[:] for r in board], t, played, answer, max(lost, 0), prev, col)
                     if cls in ("inacc", "mistake", "blunder") else None,
-                    "phase": phase_of(t, board, size), "played": played, "answer": answer,
+                    "phase": phase_of(t - handicap, board, size), "played": played, "answer": answer,
                     "reply": tuple(nxt) if nxt and nxt[0] >= 0 else None,
                     "pv": [gtp_xy(m, size) for m in src[t].get("pv") or []]})
         if played:
@@ -197,7 +220,8 @@ def compute(size, moves, evals, human=1, deep=None):
                    if any(r["phase"] == ph for r in mine)},
         "me": counts(mine), "opp": counts([r for r in rows if r["col"] != human]),
         "types": {k: cats(mine, k) for k in ("blunder", "mistake", "inacc")},
-        "leads": [round(evals[t]["lead"], 1) for t in range(len(moves) + 1) if t in evals],
+        "leads": [round(evals[t]["lead"], 1) for t in range(handicap, len(moves) + 1) if t in evals],
+        "handicap": handicap,
     }
 
 

@@ -120,11 +120,11 @@ class JudgedEngine:
                 pass
         threading.Thread(target=go, daemon=True).start()
 
-    def fill_missing(self, step=None):
-        """Na de pot: ontbrekende stellingen (bv. hervatte pot) alsnog beoordelen.
-        step() na elke beoordeling (voortgangsbalk)."""
+    def fill_missing(self, step=None, start=0):
+        """Na de pot: ontbrekende stellingen (bv. hervatte pot) alsnog beoordelen, vanaf zet start
+        (na de handicapstenen). step() na elke beoordeling (voortgangsbalk)."""
         ev, moves, size, komi = self.evals, list(self.moves), self.size, self.komi
-        for t in range(len(moves) + 1):
+        for t in range(start, len(moves) + 1):
             if t not in ev and ev is self.evals:          # stoppen als er een nieuwe pot is
                 self._remember(ev, t, self.judge.analyze(moves[:t], size, komi))
                 if step:
