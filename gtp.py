@@ -27,11 +27,20 @@ BOTS = (
     ("Kilimanjaro", "katago", ("preaz_10k", None)),
     ("Denali", "katago", ("preaz_15k", 6)),
     ("Aconcagua", "katago", ("preaz_10k", 6)),
+    ("K2", "katago", ("preaz_5k", None)),          # 5k humanlike; sterkte t.o.v. Everest niet gemeten
     ("Everest", "katago", ("preaz_10k", 3)),
     ("GNU Go 5", "gnugo", 5),
     ("GNU Go 10", "gnugo", 10),
 )
 HUMAN_NET = "b18c384nbt-humanv0.bin.gz"
+
+
+def level(bot):
+    """Niveau voor in de lijst: profiel ('10k'); '+' als de scheidsrechter blunders tegenhoudt."""
+    if bot[1] == "gnugo":
+        return "GNU"
+    prof, max_loss = bot[2]
+    return prof.split("_")[1] + ("+" if max_loss is not None else "")
 
 
 def _weak_ok():
