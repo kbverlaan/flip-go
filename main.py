@@ -1071,6 +1071,7 @@ class OfflineScene:
                 retro.text_r(s, f"{sv['size']}x{sv['size']}{hc}", 248, y + 6, PAL["text_dim"])
             else:
                 retro.text(s, bot[0], 84, y + 6)
+                retro.text_r(s, gtp.level(bot), 248, y + 6, PAL["text_dim"])
         retro.text(s, "B back START stats X stones", 4, 228, PAL["text_dim"])
         if any(b[1] == "katago" for _, b in self.rows if b) and not gtp.is_warm():
             if not load_bar(s, 236, 228, 80):
