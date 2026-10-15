@@ -988,6 +988,28 @@ def load_offline():
         return None
 
 
+HANDICAPS = {9: (0, 2, 3, 4, 5), 13: (0, 2, 3, 4, 5, 6, 7, 8, 9)}
+_HCAP_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conf", "handicap.txt")
+try:
+    new_handicap = int(open(_HCAP_FILE).read())
+except (OSError, ValueError):
+    new_handicap = 0
+
+
+def handicap_for(size):
+    return new_handicap if new_handicap in HANDICAPS.get(size, (0,)) else 0
+
+
+def set_handicap(n):
+    global new_handicap
+    new_handicap = n
+    try:
+        with open(_HCAP_FILE, "w") as f:
+            f.write(str(n))
+    except OSError:
+        pass
+
+
 class OfflineScene:
     """Lokale bot kiezen (engine op het apparaat), of de lopende pot hervatten."""
 
@@ -1014,22 +1036,26 @@ class OfflineScene:
             i = BOARD_SIZES.index(new_size) + (1 if ev.key == pygame.K_RIGHT else -1)
             set_size(BOARD_SIZES[i % len(BOARD_SIZES)])
             gtp.preload(new_size)          # warme bot alvast naar deze maat
+        elif ev.key == X_KEY:              # handicap: even, 2, 3, ... (max 5 op 9x9, 9 op 13x13)
+            opts = HANDICAPS[new_size]
+            set_handicap(opts[(opts.index(handicap_for(new_size)) + 1) % len(opts)])
         elif ev.key in A_KEYS and self.rows:
             kind, bot = self.rows[self.sel]
             if kind == "continue":
                 sv = self.saved
                 bot = next((b for b in gtp.BOTS if b[0] == sv["bot"]), None)
                 if bot:
-                    return OfflineGameScene(bot, sv["size"], sv["moves"])
+                    return OfflineGameScene(bot, sv["size"], sv["moves"], sv.get("handicap", 0))
             else:
-                return OfflineGameScene(bot, new_size)
+                return OfflineGameScene(bot, new_size, handicap=handicap_for(new_size))
         return self
 
     def draw(self, s):
         s.fill(PAL["screen"])
         retro.text_c(s, "OFFLINE", W // 2, 14, PAL["box"])
-        retro.hint(s, f"{{l}} {new_size}x{new_size} {{r}} japanese - komi 6.5", W // 2, 34,
-                   PAL["text_dim"], "c")
+        hc = handicap_for(new_size)
+        retro.hint(s, f"{{l}} {new_size}x{new_size} {{r}}  " + (f"{hc} stones - komi 0.5" if hc else
+                   "even - komi 6.5"), W // 2, 34, PAL["accent"] if hc else PAL["text_dim"], "c")
         if not self.rows:
             retro.text_c(s, "no engine installed", W // 2, 100, PAL["text_dim"])
         off = max(0, min(self.sel - 3, len(self.rows) - 7))      # 7 zichtbaar, scrollt
@@ -1041,10 +1067,11 @@ class OfflineScene:
             if kind == "continue":
                 sv = self.saved
                 retro.text(s, "CONTINUE", 84, y + 6)
-                retro.text_r(s, f"{sv['size']}x{sv['size']}", 248, y + 6, PAL["text_dim"])
+                hc = f" H{sv['handicap']}" if sv.get("handicap") else ""
+                retro.text_r(s, f"{sv['size']}x{sv['size']}{hc}", 248, y + 6, PAL["text_dim"])
             else:
                 retro.text(s, bot[0], 84, y + 6)
-        retro.text(s, "B back  START stats", 4, 228, PAL["text_dim"])
+        retro.text(s, "B back START stats X stones", 4, 228, PAL["text_dim"])
         if any(b[1] == "katago" for _, b in self.rows if b) and not gtp.is_warm():
             if not load_bar(s, 236, 228, 80):
                 retro.text_r(s, "loading bot...", 316, 228, PAL["text_dim"])
@@ -1054,16 +1081,20 @@ class OfflineGameScene(GameScene):
     """Pot tegen een lokale engine. Jij zwart, bot wit; stand in conf/offline.json."""
     KOMI = 6.5
 
-    def __init__(self, bot, size, moves=None):
+    def __init__(self, bot, size, moves=None, handicap=0):
         super().__init__(None)
         self.back = self._leave        # engine netjes afsluiten bij teruggaan
         self.gid = "offline"           # truthy: menu, pass/resign en _do werken zoals online
         self.bot, self.size, self.moves = bot, size, list(moves or [])
+        self.handicap = handicap       # eerste N zetten = zwarte stenen, dan begint wit (OGS-vorm)
+        if handicap and not self.moves:
+            self.moves = [list(p) for p in review.handicap_stones(size, handicap)]
         self.board = [[0] * size for _ in range(size)]
         self.cx = self.cy = size // 2
         self.names = ("you", bot[0][:8])
         self.me_id, self.black_id = 1, 1
-        self.komi, self.rules, self.speed = self.KOMI, "japanese", "offline"
+        self.komi = 0.5 if handicap else self.KOMI
+        self.rules, self.speed = "japanese", "offline"
         self.result = None             # (winner_kleur, 'x points'|'Resignation')
         self.review = None
         self.eng = None
@@ -1074,10 +1105,10 @@ class OfflineGameScene(GameScene):
 
     def _start(self):
         try:
-            self.eng = gtp.get_engine(self.bot[1], self.bot[2], self.size, self.KOMI)
+            self.eng = gtp.get_engine(self.bot[1], self.bot[2], self.size, self.komi)
             for i, (x, y) in enumerate(self.moves):
-                self.eng.play("B" if i % 2 == 0 else "W", x, y)
-            if len(self.moves) % 2 == 1:
+                self.eng.play("B" if review.color_at(i, self.handicap) == 1 else "W", x, y)
+            if self._turn() == 2:
                 self._bot_move()
             elif hasattr(self.eng, "eval_async"):
                 self.eng.eval_async()          # stand voor de mens alvast beoordelen (review)
@@ -1086,6 +1117,9 @@ class OfflineGameScene(GameScene):
             print("offline: engine start failed:", e)
             self._snap = {"msg": "Bot failed"}
         self.busy = False
+
+    def _turn(self):
+        return review.color_at(len(self.moves), self.handicap)
 
     def _passes(self):
         return len(self.moves) >= 2 and self.moves[-1][0] < 0 and self.moves[-2][0] < 0
@@ -1116,23 +1150,24 @@ class OfflineGameScene(GameScene):
             # Het aantal fouten om opnieuw door te rekenen volgt al uit de beoordelingen
             # van tijdens de pot, dus het totaal staat vooraf (bijna) vast.
             DEEP = 3
-            r0 = review.compute(self.size, moves, dict(e.evals), human=1)
+            H = self.handicap
+            r0 = review.compute(self.size, moves, dict(e.evals), human=1, handicap=H)
             n_deep = len(review.recheck(r0["rows"])) if r0 else 0
-            missing = sum(1 for t in range(len(moves) + 1) if t not in e.evals)
+            missing = sum(1 for t in range(H, len(moves) + 1) if t not in e.evals)
             work = {"base": 0.0, "done": 0, "total": max(1, missing + 2 * DEEP * n_deep)}
 
             def step(w=1):                        # balk loopt nooit terug, ook als het totaal wijzigt
                 work["done"] += w
                 self.analysing = min(0.99, work["base"] + (1 - work["base"]) * work["done"] / work["total"])
             self.analysing = 0.0
-            ev = e.fill_missing(step)             # momentopname van déze pot (8 visits, uniform)
-            r = review.compute(self.size, moves, ev, human=1)
+            ev = e.fill_missing(step, start=H)    # momentopname van déze pot (8 visits, uniform)
+            r = review.compute(self.size, moves, ev, human=1, handicap=H)
             if r:                                 # eigen fouten nauwkeuriger, in een APARTE dict
                 evd, todo = {}, review.recheck(r["rows"])
                 work.update(base=self.analysing, done=0, total=max(1, 2 * DEEP * len(todo)))
                 for t in todo:
                     e.deep(t, ev=evd, moves=gtp_moves, step=lambda: step(DEEP))
-                r = review.compute(self.size, moves, ev, human=1, deep=evd)
+                r = review.compute(self.size, moves, ev, human=1, deep=evd, handicap=H)
             if not r:
                 self.review = {"error": "game too short"}
                 return
@@ -1162,11 +1197,14 @@ class OfflineGameScene(GameScene):
             return
         os.makedirs(os.path.dirname(SAVE), exist_ok=True)
         with open(SAVE, "w") as f:
-            json.dump({"bot": self.bot[0], "size": self.size, "moves": self.moves}, f)
+            json.dump({"bot": self.bot[0], "size": self.size, "moves": self.moves,
+                       "handicap": self.handicap}, f)
 
     def _load(self):
-        board, cb, cw, last = goban.from_moves(self.size, [m + [0] for m in self.moves])
-        mine = len(self.moves) % 2 == 0 and not self.result
+        board, cb, cw, last = goban.from_moves(self.size, [m + [0] for m in self.moves], self.handicap)
+        if len(self.moves) <= self.handicap:
+            last = None                         # handicapstenen zijn geen 'laatste zet'
+        mine = self._turn() == 1 and not self.result
         bot_passed = bool(self.moves) and self.moves[-1][0] < 0
         self._snap = dict(
             board=board, caps=(cb, cw), last=last, nmoves=len(self.moves),
@@ -1325,8 +1363,9 @@ class GameReviewScene:
             pygame.draw.line(s, PAL["box_dk"], (x0, ym), (x1, ym))
             pygame.draw.lines(s, PAL["text"], False, pts, 1)
             for row in r["rows"]:
-                if row["col"] == human and row["cls"] in ("mistake", "blunder") and row["t"] < len(pts):
-                    px, py = pts[row["t"]]
+                i = row["t"] - r.get("handicap", 0)
+                if row["col"] == human and row["cls"] in ("mistake", "blunder") and 0 <= i < len(pts):
+                    px, py = pts[i]
                     pygame.draw.rect(s, PAL[CLS_COL[row["cls"]]], (px - 2, py - 2, 5, 5))
         # zetklassen jij | bot
         retro.dialog_box(s, (8, 94, 150, 96))
@@ -1371,7 +1410,8 @@ class WalkScene:
         self.parent, self.r, self.n = parent, r, size
         self.rows = {row["t"]: row for row in r["rows"]}
         self.T = r["moves"]
-        self.t = start if start is not None else 0
+        self.H = r.get("handicap", 0)
+        self.t = start if start is not None else self.H     # beginstenen overslaan
         self.better = False
         self.boards = self._boards()
 
@@ -1383,7 +1423,7 @@ class WalkScene:
         for t, (x, y) in enumerate(g.moves):
             out.append([row[:] for row in b])
             if x >= 0:
-                goban.apply_move(b, x, y, 1 if t % 2 == 0 else 2)
+                goban.apply_move(b, x, y, review.color_at(t, self.H))
         out.append(b)
         return out
 
@@ -1404,7 +1444,7 @@ class WalkScene:
         if ev.key == pygame.K_RIGHT:
             self.t = min(self.T - 1, self.t + 1)
         elif ev.key == pygame.K_LEFT:
-            self.t = max(0, self.t - 1)
+            self.t = max(self.H, self.t - 1)
         elif ev.key == pygame.K_DOWN:
             nxt = [t for t in bad if t > self.t]
             self.t = nxt[0] if nxt else (bad[0] if bad else self.t)
@@ -1419,7 +1459,7 @@ class WalkScene:
         row = self.rows.get(t)
         x, y = g.moves[t]
         played = None if x < 0 else (x, y)
-        col_me = "B" if t % 2 == 0 else "W"
+        col_me = "B" if review.color_at(t, self.H) == 1 else "W"
         col_op = "W" if col_me == "B" else "B"
         marks = []
         cls = row["cls"] if row else None
@@ -1435,10 +1475,10 @@ class WalkScene:
         _draw_board(s, n, self.boards[t], marks)
         # zijpaneel
         retro.dialog_box(s, (224, 14, 92, 34))
-        retro.text(s, f"#{t + 1} {_coord(played, n)}", 228, 20)
-        mine = (t % 2 == 0) == (self.r.get("human", 1) == 1)
+        retro.text(s, f"#{t - self.H + 1} {_coord(played, n)}", 228, 20)
+        mine = review.color_at(t, self.H) == self.r.get("human", 1)
         other = "opp" if self.r.get("src") == "ogs" else "bot"
-        retro.text(s, ("you" if mine else other) + f"  {t + 1}/{self.T}", 228, 34, PAL["text_dim"])
+        retro.text(s, ("you" if mine else other) + f"  {t - self.H + 1}/{self.T - self.H}", 228, 34, PAL["text_dim"])
         retro.dialog_box(s, (224, 52, 92, 50))
         if row:
             lab = next(l for k, l, _, _ in review.CLASSES if k == cls)
