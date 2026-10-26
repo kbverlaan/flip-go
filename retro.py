@@ -58,6 +58,33 @@ def text_r(surf, s, right_x, y, color=None, size=8):
     surf.blit(img, (right_x - img.get_width(), y))
 
 
+# 3x5-pixelfont voor de coördinaten langs het bord (Press Start 2P kan niet kleiner dan 8px)
+TINY = {
+    "0": "111 101 101 101 111", "1": "1 1 1 1 1", "2": "111 001 111 100 111",
+    "3": "111 001 011 001 111", "4": "101 101 111 001 001", "5": "111 100 111 001 111",
+    "6": "111 100 111 101 111", "7": "111 001 010 010 010", "8": "111 101 111 101 111",
+    "9": "111 101 111 001 111", "A": "010 101 111 101 101", "B": "110 101 110 101 110",
+    "C": "011 100 100 100 011", "D": "110 101 101 101 110", "E": "111 100 110 100 111",
+    "F": "111 100 110 100 100", "G": "011 100 101 101 011", "H": "101 101 111 101 101",
+    "J": "001 001 001 101 010", "K": "101 101 110 101 101", "L": "100 100 100 100 111",
+    "M": "101 111 111 101 101", "N": "101 111 111 111 101", "O": "010 101 101 101 010",
+    "P": "110 101 110 100 100", "Q": "010 101 101 111 011", "R": "110 101 110 101 101",
+    "S": "011 100 010 001 110", "T": "111 010 010 010 010",
+}
+
+def tiny_w(s):
+    return sum(len(TINY[ch].split()[0]) + 1 for ch in s) - 1
+
+def tiny(surf, s, x, y, color=None):
+    """Tekst in 3x5 pixels ('1' is 1 px breed), linksboven op (x, y); 1 px tussen de tekens."""
+    for ch in s:
+        for r, row in enumerate(TINY[ch].split()):
+            for k, bit in enumerate(row):
+                if bit == "1":
+                    surf.set_at((x + k, y + r), color or PAL["line"])
+        x += len(row) + 1
+
+
 def fmt_time(sec):
     """Seconden -> '2d' / '23h' / '4:32' — grover naarmate er meer tijd is."""
     if sec is None:

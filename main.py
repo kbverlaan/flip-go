@@ -50,6 +50,16 @@ def board_bg(n):
         if n in (9, 13, 19):
             for hx, hy in hoshi:
                 pygame.draw.rect(bg, PAL["line"], (o + hx * c - 1, o + hy * c - 1, 3, 3))
+        # coördinaten in de rand: cijfers links, letters onder. Op 19x19 passen ze naast een
+        # randsteen; op 9x9 en 13x13 staan ze onder de buitenkant ervan, zodat die steen ze afdekt.
+        r = board_geom(n)[3]
+        roomy = o - r >= 9
+        ly = o + span + r + (o - r - 5) // 2 if roomy else o + span + r - 5
+        for i in range(n):
+            num = str(n - i)
+            x = (o - r - retro.tiny_w(num)) // 2 if roomy else o - r + 1
+            retro.tiny(bg, num, x, o + i * c - 2)
+            retro.tiny(bg, review.LET[i], o + i * c - 1, ly)
         _BG[n] = bg
     return _BG[n]
 
