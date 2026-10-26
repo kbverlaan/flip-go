@@ -146,18 +146,26 @@ def _arrow(surf, x, y, d, color):
     pygame.draw.polygon(surf, color, pts)
 
 
-def hint(surf, s, x, y, color=None, align="l"):
-    """Tekst met {l} {r} {u} {d} als getekende pijltjes; align l/c/r t.o.v. x."""
+def hint(surf, s, x, y, color=None, align="l", bg=None):
+    """Tekst met {l} {r} {u} {d} als pijltjes en {A} {B} {X} {Y} {START} als knopje;
+    align l/c/r t.o.v. x. bg = achtergrond (de letter in het knopje is uitgespaard)."""
     import re
     color = color or PAL["text"]
-    parts = [p for p in re.split(r"(\{[lrud]\})", s) if p]
-    w = sum(8 if p in _ARROWS else font(8).size(p)[0] for p in parts)
+    parts = [p for p in re.split(r"(\{[lrud]\}|\{(?:A|B|X|Y|START)\})", s) if p]
+
+    keycol = PAL["box"] if bg is None else PAL["text"]     # toets helder, actie gedimd
+
+    def pw(p):
+        return 8 if p in _ARROWS else font(8).size(p[1:-1] if p.startswith("{") else p)[0]
+    w = sum(pw(p) for p in parts)
     x = x - w // 2 if align == "c" else x - w if align == "r" else x
     for p in parts:
         if p in _ARROWS:
-            _arrow(surf, x, y, _ARROWS[p], color)
-            x += 8
+            _arrow(surf, x, y, _ARROWS[p], keycol)
+        elif p.startswith("{"):
+            text(surf, p[1:-1], x, y, keycol)
         else:
             text(surf, p, x, y, color)
-            x += font(8).size(p)[0]
+        x += pw(p)
+
 
