@@ -8,6 +8,7 @@ Besturing (Mac-test = Flip-mapping):
 In een pot: S opent het menu (Pass / Resign / Info / Quit).
 """
 import os
+import random
 import subprocess
 import sys
 import threading
@@ -282,7 +283,8 @@ class GamesScene:
             kind, data = rows[self.sel]
             if kind == "offline":
                 sv, bot = data
-                return OfflineGameScene(bot, sv["size"], sv["moves"], sv.get("handicap", 0))
+                return OfflineGameScene(bot, sv["size"], sv["moves"], sv.get("handicap", 0),
+                                        sv.get("human", 1))
             if kind == "game":
                 return GameScene(data["id"])
             if kind == "seek":
@@ -1065,7 +1067,8 @@ class OfflineScene:
                 sv = self.saved
                 bot = next((b for b in gtp.BOTS if b[0] == sv["bot"]), None)
                 if bot:
-                    return OfflineGameScene(bot, sv["size"], sv["moves"], sv.get("handicap", 0))
+                    return OfflineGameScene(bot, sv["size"], sv["moves"], sv.get("handicap", 0),
+                                        sv.get("human", 1))
             else:
                 return OfflineGameScene(bot, new_size, handicap=handicap_for(new_size))
         return self
@@ -1101,10 +1104,11 @@ class OfflineScene:
 
 
 class OfflineGameScene(GameScene):
-    """Pot tegen een lokale engine. Jij zwart, bot wit; stand in conf/offline.json."""
+    """Pot tegen een lokale engine; stand in conf/offline.json. Jouw kleur wordt bij een
+    nieuwe pot geloot; met handicap ben je zwart (de stenen zijn voor jou)."""
     KOMI = 6.5
 
-    def __init__(self, bot, size, moves=None, handicap=0):
+    def __init__(self, bot, size, moves=None, handicap=0, human=None):
         super().__init__(None)
         self.back = self._leave        # engine netjes afsluiten bij teruggaan
         self.gid = "offline"           # truthy: menu, pass/resign en _do werken zoals online
@@ -1114,8 +1118,9 @@ class OfflineGameScene(GameScene):
             self.moves = [list(p) for p in review.handicap_stones(size, handicap)]
         self.board = [[0] * size for _ in range(size)]
         self.cx = self.cy = size // 2
-        self.names = ("you", bot[0][:8])
-        self.me_id, self.black_id = 1, 1
+        self.human = 1 if handicap else human or random.choice((1, 2))
+        self.names = ("you", bot[0][:8]) if self.human == 1 else (bot[0][:8], "you")
+        self.me_id, self.black_id = self.human, 1
         self.komi = 0.5 if handicap else self.KOMI
         self.rules, self.speed = "japanese", "offline"
         self.result = None             # (winner_kleur, 'x points'|'Resignation')
@@ -1131,7 +1136,7 @@ class OfflineGameScene(GameScene):
             self.eng = gtp.get_engine(self.bot[1], self.bot[2], self.size, self.komi)
             for i, (x, y) in enumerate(self.moves):
                 self.eng.play("B" if review.color_at(i, self.handicap) == 1 else "W", x, y)
-            if self._turn() == 2:
+            if self._turn() != self.human:
                 self._bot_move()
             elif hasattr(self.eng, "eval_async"):
                 self.eng.eval_async()          # stand voor de mens alvast beoordelen (review)
@@ -1174,7 +1179,7 @@ class OfflineGameScene(GameScene):
             # van tijdens de pot, dus het totaal staat vooraf (bijna) vast.
             DEEP = 3
             H = self.handicap
-            r0 = review.compute(self.size, moves, dict(e.evals), human=1, handicap=H)
+            r0 = review.compute(self.size, moves, dict(e.evals), human=self.human, handicap=H)
             n_deep = len(review.recheck(r0["rows"])) if r0 else 0
             missing = sum(1 for t in range(H, len(moves) + 1) if t not in e.evals)
             work = {"base": 0.0, "done": 0, "total": max(1, missing + 2 * DEEP * n_deep)}
@@ -1184,18 +1189,18 @@ class OfflineGameScene(GameScene):
                 self.analysing = min(0.99, work["base"] + (1 - work["base"]) * work["done"] / work["total"])
             self.analysing = 0.0
             ev = e.fill_missing(step, start=H)    # momentopname van déze pot (8 visits, uniform)
-            r = review.compute(self.size, moves, ev, human=1, handicap=H)
+            r = review.compute(self.size, moves, ev, human=self.human, handicap=H)
             if r:                                 # eigen fouten nauwkeuriger, in een APARTE dict
                 evd, todo = {}, review.recheck(r["rows"])
                 work.update(base=self.analysing, done=0, total=max(1, 2 * DEEP * len(todo)))
                 for t in todo:
                     e.deep(t, ev=evd, moves=gtp_moves, step=lambda: step(DEEP))
-                r = review.compute(self.size, moves, ev, human=1, deep=evd, handicap=H)
+                r = review.compute(self.size, moves, ev, human=self.human, deep=evd, handicap=H)
             if not r:
                 self.review = {"error": "game too short"}
                 return
             ts = int(time.time())
-            r.update(size=self.size, bot=self.bot[0], won=self.result[0] == 1, human=1,
+            r.update(size=self.size, bot=self.bot[0], won=self.result[0] == self.human, human=self.human,
                      date=time.strftime("%Y-%m-%d"), src="off", ts=ts)
             analyse.store(f"off-{ts}", r, [list(m) for m in moves])
             self.review = r
@@ -1204,10 +1209,11 @@ class OfflineGameScene(GameScene):
             self.review = {"error": "review failed"}
 
     def _bot_move(self):
-        self._snap = {"msg": "Thinking...", "my_turn": False, "turn_color": 2}
-        mv = self.eng.genmove("W")
+        bot = 3 - self.human
+        self._snap = {"msg": "Thinking...", "my_turn": False, "turn_color": bot}
+        mv = self.eng.genmove("B" if bot == 1 else "W")
         if mv == "resign":
-            self._finish(1, "Resignation")
+            self._finish(self.human, "Resignation")
             return
         self.moves.append([-1, -1] if mv == "pass" else list(mv))
         if mv != "pass":
@@ -1221,20 +1227,20 @@ class OfflineGameScene(GameScene):
         os.makedirs(os.path.dirname(SAVE), exist_ok=True)
         with open(SAVE, "w") as f:
             json.dump({"bot": self.bot[0], "size": self.size, "moves": self.moves,
-                       "handicap": self.handicap}, f)
+                       "handicap": self.handicap, "human": self.human}, f)
 
     def _load(self):
         board, cb, cw, last = goban.from_moves(self.size, [m + [0] for m in self.moves], self.handicap)
         if len(self.moves) <= self.handicap:
             last = None                         # handicapstenen zijn geen 'laatste zet'
-        mine = self._turn() == 1 and not self.result
+        mine = self._turn() == self.human and not self.result
         bot_passed = bool(self.moves) and self.moves[-1][0] < 0
         self._snap = dict(
             board=board, caps=(cb, cw), last=last, nmoves=len(self.moves),
             phase="finished" if self.result else "play",
             outcome=self.result[1] if self.result else "",
             winner_id=self.result[0] if self.result else None,
-            my_color=1, my_turn=mine, turn_color=1 if mine else 2,
+            my_color=self.human, my_turn=mine, turn_color=self.human if mine else 3 - self.human,
             times=("", ""),
             msg=("The end." if self.result else
                  "Bot passed" if mine and bot_passed else
@@ -1242,8 +1248,9 @@ class OfflineGameScene(GameScene):
 
     def _do(self, action):
         try:
+            me = "B" if self.human == 1 else "W"
             if action[0] == "move":
-                if not self.eng.play("B", action[1], action[2]):
+                if not self.eng.play(me, action[1], action[2]):
                     self._load()
                     self._snap["msg"] = "Illegal"
                     self.busy = False
@@ -1251,14 +1258,14 @@ class OfflineGameScene(GameScene):
                 self.moves.append([action[1], action[2]])
                 self._bot_move()
             elif action[0] == "pass":
-                self.eng.play("B", -1, -1)
+                self.eng.play(me, -1, -1)
                 self.moves.append([-1, -1])
                 if self._passes():
                     self._finish()
                 else:
                     self._bot_move()
             elif action[0] == "resign":
-                self._finish(2, "Resignation")
+                self._finish(3 - self.human, "Resignation")
             self._save()
             self._load()
         except OSError as e:          # engine gestorven: opnieuw starten, zetten herspelen
