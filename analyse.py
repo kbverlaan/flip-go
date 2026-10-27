@@ -8,17 +8,16 @@ conf/reviews/<sleutel>.json, de samenvatting voor STATS in conf/reviews.jsonl.
 import calendar
 import json
 import os
-import subprocess
 import threading
 import time
 
 import goban
+import paths
 import judge
 import ogs
 import review
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-CONF = os.path.join(HERE, "conf")
+CONF = paths.CONF
 REVIEWS = os.path.join(CONF, "reviews.jsonl")
 FULL = os.path.join(CONF, "reviews")
 THREADS = 4
@@ -106,16 +105,7 @@ class BatchJudge(judge.Judge):
     """b6-analyse met THREADS stellingen tegelijk (één query met analyzeTurns)."""
 
     def __init__(self):
-        err = open(os.path.join(judge.ENG, "engine.log"), "a")
-        err.write("--- start batch-judge\n")
-        err.flush()
-        self.p = subprocess.Popen(
-            [os.path.join(judge.ENG, "katago"), "analysis", "-config", os.path.join(judge.ENG, judge.JUDGE_CFG),
-             "-model", os.path.join(judge.ENG, judge.JUDGE_NET),
-             "-override-config", f"numAnalysisThreads={THREADS},numSearchThreadsPerAnalysisThread=1"],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=err, text=True, bufsize=1, cwd=judge.ENG)
-        self.qid = 0
-        self.lock = threading.Lock()
+        super().__init__("batch-judge", f"numAnalysisThreads={THREADS},numSearchThreadsPerAnalysisThread=1")
 
     def turns(self, moves, size, komi, rules, turns, visits, out, step, stop):
         """Stand na moves[:t] voor elke t in turns -> out[t] (zoals JudgedEngine._remember)."""

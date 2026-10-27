@@ -10,9 +10,7 @@ import threading
 import time
 
 import goban
-
-HERE = os.path.dirname(os.path.abspath(__file__))
-ENG = os.path.join(HERE, "engines")
+from paths import CONF, ENG, ENGINE_LOG
 
 # Offline tegenstanders: (label, kind, arg). gnugo-arg = level, katago-arg = human-profiel.
 # Bergnamen = MiniGo-bergenladder (humanlike-net speelt als een mens van die rank).
@@ -85,7 +83,7 @@ class Engine:
                    "-override-config", f"humanSLProfile={arg},defaultBoardSize={size}"]
         self.kind, self.arg = kind, arg
         self.lock = threading.Lock()
-        err = open(os.path.join(ENG, "engine.log"), "a")    # waarom een engine stopt
+        err = open(ENGINE_LOG, "a")
         err.write(f"--- start {kind} {arg} {'gpu' if self.gpu else 'cpu'}\n")
         err.flush()
         self.p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -165,7 +163,7 @@ def _gpu_ok():
 # (GPU/CPU, start/wissel, bordmaat) wel vrij constant: de balk loopt op de vorige meting.
 # Stappen die op elkaar volgen (opstarten, afbreken, opnieuw) vormen één balk die nooit
 # terugloopt: duurt het langer dan verwacht, dan blijft hij staan.
-LOADTIMES = os.path.join(HERE, "conf", "loadtimes.json")
+LOADTIMES = os.path.join(CONF, "loadtimes.json")
 _bar = None             # {"t0", "exp", "phase": t0 lopende stap of None, "end", "shown"}
 
 

@@ -27,6 +27,7 @@ import analyse
 import gtp
 import json
 import ogs
+import paths
 import review
 
 _BG = {}
@@ -70,7 +71,7 @@ def board_geom(n):
     span = c * (n - 1)
     return c, 4 + (212 - span) // 2, 14 + (212 - span) // 2, max(4, c * 2 // 5 + 1)
 
-_VF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.txt")
+_VF = os.path.join(paths.HERE, "version.txt")
 VERSION = open(_VF).read().strip()[:7] if os.path.exists(_VF) else "dev"
 
 SCALE = 2  # 640x480 venster; op de Flip fullscreen 2x
@@ -348,7 +349,7 @@ class GamesScene:
         draw_nowifi(s)
 
 
-CONF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conf")
+CONF = paths.CONF
 
 
 def read_pref(name, default, cast=str):
@@ -654,7 +655,7 @@ class HistoryScene:
             self._seen = time.monotonic()
             self._done = analyse.done_keys()
             self._lpm = {r.get("key"): (r["loss_per_move"], review.accuracy(r))
-                         for r in review.history(REVIEWS, n=100000)}
+                         for r in review.history(analyse.REVIEWS, n=100000)}
         done, lpm = self._done, self._lpm
         off = max(0, min(self.sel - 3, len(self.rows) - 7))
         for i, r in enumerate(self.rows[off:off + 7]):
@@ -1010,7 +1011,7 @@ class GameScene:
                 threading.Thread(target=self._load, daemon=True).start()
 
 
-SAVE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conf", "offline.json")
+SAVE = os.path.join(paths.CONF, "offline.json")
 
 
 def saved_bot(sv):
@@ -1301,7 +1302,6 @@ class OfflineGameScene(GameScene):
             threading.Thread(target=self.eng.close, daemon=True).start()
         return OfflineScene()
 
-REVIEWS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conf", "reviews.jsonl")
 TINT_GOOD, TINT_BAD = (214, 232, 204), (240, 214, 206)     # vlak onder de scorelijn
 X_KEY = pygame.K_r                 # knop X: overal wisselen tussen punten en procenten
 view_pct = read_pref("view", "pts") == "pct"
@@ -1561,7 +1561,7 @@ class StatsScene:
 
     def __init__(self, parent, size=None):
         self.parent = parent
-        have = {r.get("size") for r in review.history(REVIEWS, n=100000)}
+        have = {r.get("size") for r in review.history(analyse.REVIEWS, n=100000)}
         self.sizes = tuple(sorted(have | set(BOARD_SIZES)))
         self.size = size if size in self.sizes else new_size
         self.src = 0
@@ -1583,7 +1583,7 @@ class StatsScene:
     def draw(self, s):
         s.fill(PAL["screen"])
         src, lab = self.SRC[self.src]
-        h = review.history(REVIEWS, self.size, 20, src)
+        h = review.history(analyse.REVIEWS, self.size, 20, src)
         retro.text_c(s, "STATS", W // 2, 6, PAL["box"])
         retro.hint(s, f"{{l}} {self.size}x{self.size} {{r}}  {{u}} {lab} {{d}}  {len(h)} games", W // 2, 20,
                    PAL["text_dim"], "c")
@@ -1724,7 +1724,7 @@ def main():
           [pygame.joystick.Joystick(i).get_name()
            for i in range(pygame.joystick.get_count())])
     shot = "--shot" in sys.argv
-    icon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icon.png")
+    icon = os.path.join(paths.ASSETS, "icon.png")
     if os.path.exists(icon):    # vóór set_mode, anders toont het Dock op de Mac het pygame-icoon
         pygame.display.set_icon(pygame.image.load(icon))
     win = pygame.display.set_mode((W * SCALE, H * SCALE))

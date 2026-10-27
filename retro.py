@@ -7,8 +7,10 @@ import re
 import pygame
 from pathlib import Path
 
+import paths
+
 W, H = 320, 240          # intern canvas; Flip = 640x480 = exact 2x
-ASSETS = Path(__file__).parent / "assets"
+ASSETS = Path(paths.ASSETS)
 
 PAL = {
     "screen":   (24, 32, 28),     # buiten het bord

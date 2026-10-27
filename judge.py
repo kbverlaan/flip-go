@@ -14,8 +14,8 @@ import threading
 import time
 
 import goban
+from paths import ENG, ENGINE_LOG
 
-ENG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "engines")
 JUDGE_NET = "b6c96.bin.gz"
 JUDGE_CFG = "judge_analysis.cfg"
 VISITS = 8           # genoeg voor pass/opgave/grove blunders; ~0,7 s op 13x13 (Flip)
@@ -31,13 +31,13 @@ def available():
 class Judge:
     """b6-net als KataGo-analyse-engine (JSON over stdin/stdout)."""
 
-    def __init__(self):
-        err = open(os.path.join(ENG, "engine.log"), "a")
-        err.write("--- start judge\n")
+    def __init__(self, label="judge", override=None):
+        err = open(ENGINE_LOG, "a")
+        err.write(f"--- start {label}\n")
         err.flush()
         self.p = subprocess.Popen(
             [os.path.join(ENG, "katago"), "analysis", "-config", os.path.join(ENG, JUDGE_CFG),
-             "-model", os.path.join(ENG, JUDGE_NET)],
+             "-model", os.path.join(ENG, JUDGE_NET)] + (["-override-config", override] if override else []),
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=err, text=True, bufsize=1,
             cwd=ENG)
         self.qid = 0
