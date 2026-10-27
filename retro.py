@@ -194,6 +194,7 @@ def hint(surf, s, x, y, color=None, align="l", bg=None):
 #           datascherm (HISTORY, REVIEW, STATS): titel y 6, inhoud vanaf y 22.
 #   Lijst   smalle menuregel 208 breed (gecentreerd), brede dataregel 304. Regel 20 hoog,
 #           of 36 met een ondertitel; 4 ertussen. Pijl op x+8, label op x+20, waarde rechts op x+w-8.
+#           Dataregel: bordmaat ('9x9') in een vaste kolom op x+158 (YOUR GAMES, HISTORY).
 #   Onder   y 228: knoppenhints links, status rechts (laden, versturen, fouten, no wifi).
 #           Knoppen (YOUR GAMES) op y 200, 20 hoog. Een melding (notice) neemt de hele onderste
 #           regel over, in rood; het bord eindigt op y 226, dus hij valt er nooit overheen.
@@ -203,6 +204,7 @@ FOOT_Y, LEFT, RIGHT = 228, 4, 316
 BUTTON_Y = 200
 MENU, WIDE = (56, 208), (8, 304)          # (x, breedte)
 ROW_H, ROW2_H, GAP = 20, 36, 4
+SIZE_COL = 158                            # bordmaat-kolom in een dataregel
 
 
 def arrow(surf, x, y, color=None):

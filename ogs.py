@@ -152,7 +152,7 @@ def format_outcome(winner_is_black, outcome):
 
 
 def my_games():
-    """Actieve potten uit het overview. -> lijst {id, opp, my_turn, speed}"""
+    """Actieve potten uit het overview. -> lijst {id, opp, size, my_turn, speed, left}"""
     mid = me().get("id")
     out = []
     for g in api("ui/overview").get("active_games", []):
@@ -164,6 +164,7 @@ def my_games():
         out.append({
             "id": g.get("id"),
             "opp": opp.get("username", "?"),
+            "size": gd.get("width"),
             "my_turn": gd.get("clock", {}).get("current_player") == mid,
             "speed": speed_label(gd.get("time_control", {}).get("speed", "")),
             "left": max(0, exp / 1000 - time.time()) if exp else None,

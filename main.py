@@ -319,24 +319,26 @@ class GamesScene:
         off = max(0, min(self.sel - 3, len(rows) - 6))          # 6 zichtbaar, scrollt
         for i, (kind, data) in enumerate(rows[off:off + 6]):
             y, sel = retro.row_y(i), i + off == self.sel
+            lab, val, lcol, vcol, size = None, None, None, None, None
             if kind == "offline":
-                retro.row(s, y, f"vs {data[1][0]}", "offline", selected=sel, wide=True)
+                lab, val, size = f"vs {data[1][0][:13]}", "offline", data[0].get("size")
             elif kind == "game":
+                lab, size = f"vs {data['opp'][:13]}", data.get("size")
                 if data["my_turn"] and data.get("left"):
-                    val, col = retro.fmt_time(data["left"]), PAL["text"]
+                    val, vcol = retro.fmt_time(data["left"]), PAL["text"]
                 elif data["my_turn"]:
-                    val, col = "*", PAL["accent"]
+                    val, vcol = "*", PAL["accent"]
                 else:
-                    val, col = data["speed"], None
-                retro.row(s, y, f"vs {data['opp'][:19]}", val, selected=sel, wide=True, value_col=col)
-            elif kind == "seek":
-                if self.stopping == data["id"]:
-                    retro.row(s, y, "stopping...", selected=sel, wide=True, label_col=PAL["text_dim"])
-                elif self.cancelq == data["id"]:
-                    retro.row(s, y, "stop seeking? A/B", selected=sel, wide=True, label_col=PAL["accent"])
-                else:
-                    retro.row(s, y, "seeking", data["speed"], selected=sel, wide=True,
-                              label_col=PAL["text_dim"])
+                    val = data["speed"]
+            elif self.stopping == data["id"]:
+                lab, lcol = "stopping...", PAL["text_dim"]
+            elif self.cancelq == data["id"]:
+                lab, lcol = "stop seeking? A/B", PAL["accent"]
+            else:
+                lab, val, lcol, size = "seeking", data["speed"], PAL["text_dim"], data.get("size")
+            x, ty = retro.row(s, y, lab, val, selected=sel, wide=True, label_col=lcol, value_col=vcol)
+            if size:
+                retro.text(s, f"{size}x{size}", x + retro.SIZE_COL, ty, PAL["text_dim"])
         on_footer = self.sel == len(rows)
         for f, (bx, label) in enumerate(((8, "NEW GAME"), (162, "HISTORY"))):
             retro.button(s, bx, 150, label, on_footer and self.fsel == f)
@@ -644,7 +646,7 @@ class HistoryScene:
         done, lpm = self._done, self._lpm
         off = max(0, min(self.sel - 3, len(self.rows) - 8))      # 8 zichtbaar, scrollt
         for i, r in enumerate(self.rows[off:off + 8]):
-            _, y = retro.row(s, retro.row_y(i, top=retro.DATA_Y), None, selected=i + off == self.sel, wide=True)
+            x, y = retro.row(s, retro.row_y(i, top=retro.DATA_Y), None, selected=i + off == self.sel, wide=True)
             if r["key"] == "all":
                 todo = len(self._todo())
                 w = analyse.worker
@@ -661,7 +663,8 @@ class HistoryScene:
             retro.text(s, "won " if r.get("won") else "lost", 28, y,
                        PAL["green"] if r.get("won") else PAL["accent"])
             retro.text(s, f"{r['opp'][:11]}", 68, y)
-            retro.text(s, f"{r.get('size') or '?'}" + ("" if r.get("src") == "ogs" else "*"), 166, y,
+            n = r.get("size")
+            retro.text(s, (f"{n}x{n}" if n else "?") + ("" if r.get("src") == "ogs" else "*"), x + retro.SIZE_COL, y,
                        PAL["text_dim"])
             st = analyse.worker.status.get(r.get("id")) if r.get("src") == "ogs" else None
             if r["key"] in done:
