@@ -43,7 +43,9 @@ def login(timeout=180):
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
             q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-            got["code"] = q.get("code", [None])[0]
+            if "code" in q or "error" in q:      # niet /favicon.ico: dat overschreef de code
+                got["code"] = q.get("code", [None])[0]
+                got["error"] = q.get("error", [None])[0]
             self.send_response(200)
             self.send_header("Content-Type", "text/html")
             self.end_headers()
@@ -64,7 +66,8 @@ def login(timeout=180):
         time.sleep(0.5)
     srv.shutdown()
     if not got.get("code"):
-        raise SystemExit("Geen authorization code ontvangen (timeout).")
+        raise SystemExit(f"OGS weigerde: {got['error']}" if got.get("error") else
+                         "Geen authorization code ontvangen (timeout).")
     r = S.post("https://online-go.com/oauth2/token/", data={
         "grant_type": "authorization_code", "code": got["code"],
         "redirect_uri": REDIRECT, "client_id": CLIENT_ID,
