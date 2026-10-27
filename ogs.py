@@ -339,14 +339,20 @@ def _challenge_body(speed, size, ranked):
     }
 
 
+SEEK_RANGE = 3      # open challenge: alleen spelers tot zoveel rangen boven of onder jou
+
+
 def create_challenge(speed="daily", size=9, ranked=True):
-    """Open challenge (japanese, auto-komi)."""
+    """Open challenge (japanese, auto-komi) voor spelers rond je eigen rang (vers opgehaald).
+    OGS geeft meteen het pot-nummer mee; dat bewaren we voor de zoeker."""
     body = _challenge_body(speed, size, ranked)
-    body.update(min_ranking=0, max_ranking=36)
+    mine = round(float(api("me").get("ranking") or 5))
+    body.update(min_ranking=max(0, mine - SEEK_RANGE), max_ranking=min(36, mine + SEEK_RANGE))
     r = S.post(f"{BASE}/challenges/", json=body, headers=_auth(), timeout=15)
     r.raise_for_status()
     res = r.json()
-    _chall_store(_chall_store() + [{"id": res.get("challenge"), "speed": speed, "size": size}])
+    _chall_store(_chall_store() + [{"id": res.get("challenge"), "game": res.get("game"),
+                                    "speed": speed, "size": size}])
     return res
 
 
