@@ -176,6 +176,15 @@ def draw_status(s):
         pygame.draw.rect(s, PAL["accent"], (282, 7, 3, 6))
 
 
+_net = {"down": False}      # laatste OGS-verzoek mislukt (ook op de Mac, zonder wifi-sensor)
+
+
+def draw_nowifi(s):
+    """'no wifi' rechtsonder op de menupagina's, zoals in HISTORY."""
+    if _net["down"]:
+        retro.text_r(s, "no wifi", 316, 228, PAL["accent"])
+
+
 def arrow(s, x, y, color=None):
     """Pokemon-cursor: klein driehoekje."""
     c = color or PAL["text"]
@@ -230,9 +239,11 @@ class GamesScene:
             self.seeking = ogs.my_challenges()
             m = ogs.me()
             self.me_label = f"{m.get('username')} - {ogs.rank_label(m.get('ranking'))}"
+            _net["down"] = False
         except Exception:
             self.error = "No connection"
             self.games = []
+            _net["down"] = True
 
     FOOTER = ("NEW GAME", "HISTORY")
 
@@ -334,10 +345,9 @@ class GamesScene:
             if on_footer and self.fsel == f:
                 arrow(s, bx + 10, 192 + 9)
             retro.text_c(s, label, bx + 76, 192 + 9)
-        if self.error:
-            retro.text_c(s, self.error, W // 2, 220, PAL["text_dim"])
-        elif self.me_label:
+        if self.me_label:
             retro.text_c(s, self.me_label, W // 2, 226, PAL["text_dim"])
+        draw_nowifi(s)
 
 
 BOARD_SIZES = (9, 13)
@@ -421,6 +431,7 @@ class NewGameScene:
             retro.text(s, desc, 80, y + 21, PAL["text_dim"])
         if self.msg:
             retro.text_c(s, self.msg, W // 2, 210, PAL["text_dim"])
+        draw_nowifi(s)
 
 
 class BotScene:
@@ -443,8 +454,9 @@ class BotScene:
                 d = ogs.api(f"players/{pid}")
                 rating = (d.get("ratings") or {}).get("overall", {}).get("rating")
                 self.ranks[pid] = ogs.rating_to_rank(rating)
+                _net["down"] = False
             except Exception:
-                pass
+                _net["down"] = True
 
     def handle(self, ev):
         if ev.type != pygame.KEYDOWN:
@@ -498,6 +510,7 @@ class BotScene:
                 retro.text_r(s, rk, 248, y + 7, PAL["text_dim"])
         if self.msg:
             retro.text_c(s, self.msg, W // 2, 218, PAL["text_dim"])
+        draw_nowifi(s)
 
 
 class PastGame:
@@ -567,6 +580,7 @@ class HistoryScene:
             except Exception as e:             # geen wifi/OGS: lokaal bewaarde lijst
                 print("history:", e)
                 got, self.more, self.offline = [], False, True
+            _net["down"] = self.offline
             for g in got:
                 g.update(key=f"ogs-{g['id']}", src="ogs", ts=analyse._iso_ts(g.get("ended")))
             if got:
@@ -1086,6 +1100,8 @@ class OfflineScene:
         if any(b[1] == "katago" for _, b in self.rows if b) and not gtp.is_warm():
             if not load_bar(s, 236, 228, 80):
                 retro.text_r(s, "loading bot...", 316, 228, PAL["text_dim"])
+        else:
+            draw_nowifi(s)
 
 
 class OfflineGameScene(GameScene):
