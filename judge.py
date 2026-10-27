@@ -2,9 +2,9 @@
 
 Het humanlike-net (1 netwerk-evaluatie, `kata-raw-nn 0`) levert de menselijke
 kansverdeling; daaruit trekken we een zet. Een klein net (b6) als KataGo-analyse-engine
-beslist over passen en opgeven en keurt zetten af die meer dan `max_loss` punten
-weggeven (de sterkteknop per berg). Zo blijft de zet menselijk, maar speelt de bot een
-pot netjes uit en verdwijnen de grofste blunders.
+beslist over passen en opgeven en kan zetten afkeuren die meer dan `max_loss` punten
+weggeven (nu bij geen berg in gebruik, zie gtp.BOTS). Zo blijft de zet menselijk en
+speelt de bot een pot netjes uit.
 """
 import json
 import os

@@ -18,17 +18,14 @@ LETTERS = "ABCDEFGHJKLMNOPQRST"
 # Laagste geldige profiel is 20k: een onbekend profiel (preaz_25k) laat KataGo crashen.
 # katago-arg = (profiel, max_loss): de scheidsrechter keurt zetten af die meer dan
 # max_loss punten weggeven (None = alleen pass/opgave bewaken).
-# Volgorde = gemeten sterkte (testharnas 9 okt 2026, go-beginnerbot): het filter is een
-# veel grotere sterkteknop dan het profiel. Zonder filter ~ Bouvardia-niveau (OGS ~24k).
+# Treden van 5 kyu, zonder filter (27 okt 2026). Bot tegen bot gemeten (900 potten 13x13):
+# elke trede wint ruim van de vorige; het filter tilde een bot ver boven zijn profiel uit.
 BOTS = (
     ("Vaalserberg", "katago", ("preaz_25k", None)),   # vereist gepatchte KataGo (21k-30k)
     ("Zugspitze", "katago", ("preaz_20k", None)),
     ("Mont Blanc", "katago", ("preaz_15k", None)),
     ("Kilimanjaro", "katago", ("preaz_10k", None)),
-    ("Denali", "katago", ("preaz_15k", 6)),
-    ("Aconcagua", "katago", ("preaz_10k", 6)),
-    ("K2", "katago", ("preaz_5k", None)),          # 5k humanlike; sterkte t.o.v. Everest niet gemeten
-    ("Everest", "katago", ("preaz_10k", 3)),
+    ("K2", "katago", ("preaz_5k", None)),
     ("GNU Go 5", "gnugo", 5),
     ("GNU Go 10", "gnugo", 10),
 )
