@@ -1702,6 +1702,9 @@ def main():
           [pygame.joystick.Joystick(i).get_name()
            for i in range(pygame.joystick.get_count())])
     shot = "--shot" in sys.argv
+    icon = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icon.png")
+    if os.path.exists(icon):    # vóór set_mode, anders toont het Dock op de Mac het pygame-icoon
+        pygame.display.set_icon(pygame.image.load(icon))
     win = pygame.display.set_mode((W * SCALE, H * SCALE))
     pygame.display.set_caption("flip-go")
     canvas = pygame.Surface((W, H))
