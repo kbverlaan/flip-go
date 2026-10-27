@@ -981,6 +981,12 @@ class GameScene:
 SAVE = os.path.join(paths.CONF, "offline.json")
 
 
+def opp_rank(name):
+    """Kyu van een lokale bot ('20k'); None voor GNU Go of een bot die niet meer in de ladder staat."""
+    bot = next((b for b in gtp.BOTS if b[0] == name), None)
+    return gtp.level(bot) if bot and bot[1] == "katago" else None
+
+
 def saved_bot(sv):
     """Bot van een opgeslagen pot, of None (geen pot, of die bot staat niet meer in de ladder)."""
     return sv and next((b for b in gtp.BOTS if b[0] == sv.get("bot")), None)
@@ -1181,7 +1187,8 @@ class OfflineGameScene(GameScene):
                 self.review = {"error": "game too short"}
                 return
             ts = int(time.time())
-            r.update(size=self.size, bot=self.bot[0], won=self.result[0] == self.human, human=self.human,
+            r.update(size=self.size, bot=self.bot[0], opp_rank=opp_rank(self.bot[0]),
+                     won=self.result[0] == self.human, human=self.human,
                      date=time.strftime("%Y-%m-%d"), src="off", ts=ts)
             analyse.store(f"off-{ts}", r, [list(m) for m in moves])
             self.review = r
@@ -1339,7 +1346,9 @@ class GameReviewScene:
         res = "won" if g.result and g.result[0] == human else "lost"
         retro.title(s, "REVIEW", data=True)
         retro.hint(s, "{X} " + ("pts" if view_pct else "%"), 316, 6, PAL["text_dim"], "r")
-        retro.text_c(s, f"vs {g.bot[0]}  {g.size}x{g.size}  {res}", W // 2, 20, PAL["text_dim"])
+        rk = (r or {}).get("opp_rank") or getattr(g, "row", {}).get("opp_rank") or opp_rank(g.bot[0])
+        opp = f"{g.bot[0][:14]} {rk}" if rk else g.bot[0]
+        retro.text_c(s, f"vs {opp}  {g.size}x{g.size}  {res}", W // 2, 20, PAL["text_dim"])
         if r is None or r.get("error"):
             retro.text_c(s, r["error"] if r else "analysing", W // 2, 110, PAL["text_dim"])
             if r is None and getattr(g, "analysing", None) is not None:

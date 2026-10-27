@@ -189,7 +189,8 @@ def analyse_ogs(gid, eng, progress, stop):
     won = bool(g.get("white_lost") if human == 1 else g.get("black_lost"))
     opp = gd["players"]["white" if human == 1 else "black"].get("username", "?")
     ts = _iso_ts(g.get("ended"))
-    r.update(size=size, bot=opp, won=won, human=human, src="ogs", gid=gid, ts=ts,
+    r.update(size=size, bot=opp, opp_rank=ogs.opp_rank(g, human == 1), won=won, human=human,
+             src="ogs", gid=gid, ts=ts,
              date=time.strftime("%Y-%m-%d", time.gmtime(ts)))
     key = f"ogs-{gid}"
     store(key, r, [list(m) for m in moves])

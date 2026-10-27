@@ -171,8 +171,14 @@ def my_games():
     return out
 
 
+def opp_rank(g, i_black):
+    """Rang van de tegenstander tijdens pot g ('25k'), uit historical_ratings; None als onbekend."""
+    h = (g.get("historical_ratings") or {}).get("white" if i_black else "black") or {}
+    return rank_label(h["ranking"]) if h.get("ranking") is not None else None
+
+
 def my_history(n=10, page=1):
-    """Afgeronde potten, nieuwste eerst. -> {id, opp, won, result, size, ended}"""
+    """Afgeronde potten, nieuwste eerst. -> {id, opp, opp_rank, won, result, size, ended}"""
     mid = me().get("id")
     out = []
     for g in api(f"players/{mid}/games", ordering="-ended", page_size=n, page=page).get("results", []):
@@ -184,6 +190,7 @@ def my_history(n=10, page=1):
         out.append({
             "id": g["id"],
             "opp": (white if i_black else black).get("username", "?"),
+            "opp_rank": opp_rank(g, i_black),
             "won": bool(g.get("white_lost") if i_black else g.get("black_lost")),
             "result": format_outcome(g.get("white_lost"), g.get("outcome", "")),
             "size": g.get("width"), "ended": g.get("ended"),
