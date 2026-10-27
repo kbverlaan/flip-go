@@ -474,7 +474,10 @@ class Seeker:
                 continue
             self.watch.pop(cid, None)
             _chall_drop(cid)
-            self.found = self._game(c.get("game"), c.get("speed")) or self.found
+            found = self._game(c.get("game"), c.get("speed"))
+            print(f"seeker: challenge {cid} ({c.get('speed')}) "
+                  + (f"aangenomen door {found['opp']}, pot {found['game']}" if found else "weg, geen pot"), flush=True)
+            self.found = found or self.found
             self.changes += 1
         if self.found and now - self._checked.get("found", 0) > 5:      # nog speelbaar?
             self._checked["found"] = now

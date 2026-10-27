@@ -20,6 +20,9 @@ if "--shot" in sys.argv:
 
 import pygame
 import retro
+
+sys.stdout.reconfigure(line_buffering=True)    # log.txt per regel bijwerken (naar een bestand buffert
+                                               # Python anders per blok en mis je meldingen)
 from retro import PAL, W, H
 
 import goban
