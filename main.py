@@ -226,7 +226,6 @@ class GamesScene:
     def __init__(self):
         self.games = None
         self.seeking = []
-        self.error = None
         self.sel = 0
         self.t0 = time.monotonic()
         self.cancelq = None      # challenge-id in bevestiging
@@ -244,7 +243,6 @@ class GamesScene:
             self.me_label = f"{m.get('username')} - {ogs.rank_label(m.get('ranking'))}"
             _net["down"] = False
         except Exception:
-            self.error = "No connection"
             self.games = []
             _net["down"] = True
 
@@ -281,7 +279,7 @@ class GamesScene:
             if self.sel == len(rows):
                 if self.fsel == 1:
                     return HistoryScene()
-                return OfflineScene() if self.error else NewGameScene()
+                return NewGameScene()
             kind, data = rows[self.sel]
             if kind == "offline":
                 return resume_offline(data[0]) or self
@@ -340,8 +338,7 @@ class GamesScene:
                     retro.row(s, y, "seeking", data["speed"], selected=sel, wide=True,
                               label_col=PAL["text_dim"])
         on_footer = self.sel == len(rows)
-        left_label = "OFFLINE" if self.error else "NEW GAME"
-        for f, (bx, label) in enumerate(((8, left_label), (162, "HISTORY"))):
+        for f, (bx, label) in enumerate(((8, "NEW GAME"), (162, "HISTORY"))):
             retro.button(s, bx, 150, label, on_footer and self.fsel == f)
         draw_nowifi(s)
 
@@ -377,11 +374,16 @@ def set_size(n):
 
 
 class NewGameScene:
-    """Nieuwe pot: daily, live (open challenge) of een bot van de bloemenladder."""
-    OPTIONS = (("daily", ogs.time_label("daily")),
-               ("live", ogs.time_label("live")),
-               ("bots", "the flower ladder"),
-               ("offline", "local bot, no wifi"))
+    """Nieuwe pot: daily, live (open challenge), een bot van de bloemenladder of een lokale bot.
+    Zonder verbinding staan de online-opties er niet (niet grijs): A blijft gewoon werken."""
+    ONLINE = (("daily", ogs.time_label("daily")),
+              ("live", ogs.time_label("live")),
+              ("bots", "the flower ladder"))
+    LOCAL = (("offline", "local bot, no wifi"),)
+
+    @property
+    def options(self):
+        return self.LOCAL if _net["down"] else self.ONLINE + self.LOCAL
 
     def __init__(self, back=None):
         self.back = back or GamesScene
@@ -397,17 +399,18 @@ class NewGameScene:
             return self.back()
         if self.busy:
             return self
+        self.sel = min(self.sel, len(self.options) - 1)       # lijst kan korter worden (geen wifi)
         if ev.key == pygame.K_DOWN:
-            self.sel = min(len(self.OPTIONS) - 1, self.sel + 1)
+            self.sel = min(len(self.options) - 1, self.sel + 1)
         elif ev.key == pygame.K_UP:
             self.sel = max(0, self.sel - 1)
         elif ev.key in (pygame.K_LEFT, pygame.K_RIGHT):
             i = BOARD_SIZES.index(new_size) + (1 if ev.key == pygame.K_RIGHT else -1)
             set_size(BOARD_SIZES[i % len(BOARD_SIZES)])
         elif ev.key in A_KEYS:
-            if self.OPTIONS[self.sel][0] == "bots":
+            if self.options[self.sel][0] == "bots":
                 return BotScene()
-            if self.OPTIONS[self.sel][0] == "offline":
+            if self.options[self.sel][0] == "offline":
                 return OfflineScene()
             self.busy = True
             self.msg = "posting..."
@@ -416,7 +419,7 @@ class NewGameScene:
 
     def _create(self):
         try:
-            ogs.create_challenge(self.OPTIONS[self.sel][0], new_size)
+            ogs.create_challenge(self.options[self.sel][0], new_size)
             self.goto = GamesScene()            # daar staat de zoekopdracht als 'seeking'
         except Exception:
             self.msg = "failed"
@@ -425,8 +428,9 @@ class NewGameScene:
     def draw(self, s):
         s.fill(PAL["screen"])
         retro.title(s, "NEW GAME")
-        retro.subtitle(s, f"{{l}} {new_size}x{new_size} {{r}} ranked - {goban.RULES}")
-        for i, (name, desc) in enumerate(self.OPTIONS):
+        retro.subtitle(s, f"{{l}} {new_size}x{new_size} {{r}}" + ("" if _net["down"] else f" ranked - {goban.RULES}"))
+        self.sel = min(self.sel, len(self.options) - 1)
+        for i, (name, desc) in enumerate(self.options):
             retro.row(s, retro.row_y(i, two=True), name.upper(), sub=desc, selected=i == self.sel)
         if self.msg:
             retro.status(s, self.msg, PAL["accent"] if self.msg == "failed" else None)
@@ -1013,7 +1017,8 @@ def set_handicap(n):
 class OfflineScene:
     """Lokale bot kiezen (engine op het apparaat), of de lopende pot hervatten."""
 
-    def __init__(self):
+    def __init__(self, back=None):
+        self.back = back or NewGameScene
         self.saved = load_offline()
         gtp.preload(new_size)
         self.rows = ([("continue", None)] if self.saved else []) + \
@@ -1026,7 +1031,7 @@ class OfflineScene:
         if ev.key == pygame.K_s:
             return StatsScene(self)
         if ev.key in B_KEYS:
-            return TitleScene()
+            return self.back()
         if ev.key == pygame.K_DOWN:
             self.sel = min(len(self.rows) - 1, self.sel + 1)
         elif ev.key == pygame.K_UP:
