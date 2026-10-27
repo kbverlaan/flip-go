@@ -3,6 +3,7 @@
 Pokemon-achtige taal: dialoogbox met dubbele rand, 8px pixelfont,
 klein vast palet. Alles tekent op het interne canvas; main.py schaalt.
 """
+import re
 import pygame
 from pathlib import Path
 
@@ -34,11 +35,22 @@ def font(size=8):
         _fonts[size] = pygame.font.Font(str(ASSETS / "PressStart2P.ttf"), size)
     return _fonts[size]
 
+_TEXTS = {}
+
+def _render(s, color, size):
+    """Gerenderde tekst uit een cache: de menu's tekenen elk frame dezelfde regels."""
+    key = (s, color or PAL["text"], size)
+    if key not in _TEXTS:
+        if len(_TEXTS) > 512:       # klokken en tellers maken steeds nieuwe regels
+            _TEXTS.clear()
+        _TEXTS[key] = font(size).render(s, False, key[1])
+    return _TEXTS[key]
+
 def text(surf, s, x, y, color=None, size=8):
-    surf.blit(font(size).render(s, False, color or PAL["text"]), (x, y))
+    surf.blit(_render(s, color, size), (x, y))
 
 def text_c(surf, s, cx, y, color=None, size=8):
-    img = font(size).render(s, False, color or PAL["text"])
+    img = _render(s, color, size)
     surf.blit(img, (cx - img.get_width() // 2, y))
 
 def dialog_box(surf, rect):
@@ -54,7 +66,7 @@ def dialog_box(surf, rect):
         surf.set_at((cx, cy), PAL["screen"])
 
 def text_r(surf, s, right_x, y, color=None, size=8):
-    img = font(size).render(s, False, color or PAL["text"])
+    img = _render(s, color, size)
     surf.blit(img, (right_x - img.get_width(), y))
 
 
@@ -149,7 +161,6 @@ def _arrow(surf, x, y, d, color):
 def hint(surf, s, x, y, color=None, align="l", bg=None):
     """Tekst met {l} {r} {u} {d} als pijltjes en {A} {B} {X} {Y} {START} als knopje;
     align l/c/r t.o.v. x. bg = achtergrond (de letter in het knopje is uitgespaard)."""
-    import re
     color = color or PAL["text"]
     parts = [p for p in re.split(r"(\{[lrud]\}|\{(?:A|B|X|Y|START)\})", s) if p]
 
