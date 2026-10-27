@@ -1345,7 +1345,6 @@ class GameReviewScene:
         human = getattr(g, "human", 1)
         res = "won" if g.result and g.result[0] == human else "lost"
         retro.title(s, "REVIEW", data=True)
-        retro.hint(s, "{X} " + ("pts" if view_pct else "%"), 316, 6, PAL["text_dim"], "r")
         rk = (r or {}).get("opp_rank") or getattr(g, "row", {}).get("opp_rank") or opp_rank(g.bot[0])
         opp = f"{g.bot[0][:14]} {rk}" if rk else g.bot[0]
         retro.text_c(s, f"vs {opp}  {g.size}x{g.size}  {res}", W // 2, 20, PAL["text_dim"])
@@ -1406,9 +1405,7 @@ class GameReviewScene:
                          PAL["text_dim"])
         if not types:
             retro.text(s, "no mistakes", 168, 144, PAL["text_dim"])
-        retro.dialog_box(s, (8, 196, 304, 22))
-        retro.hint(s, "{A} WALK", 16, 203, bg=PAL["box"])
-        retro.hint(s, "{START} STATS", 304, 203, align="r", bg=PAL["box"])
+        retro.foot(s, "{A} walk  {START} stats  {X} " + ("pts" if view_pct else "%"))
 
 
 class WalkScene:
