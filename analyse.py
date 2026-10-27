@@ -21,7 +21,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 CONF = os.path.join(HERE, "conf")
 REVIEWS = os.path.join(CONF, "reviews.jsonl")
 FULL = os.path.join(CONF, "reviews")
-LETTERS = "ABCDEFGHJKLMNOPQRST"
 THREADS = 4
 DEEP = 3            # werk van een stelling op 30 visits t.o.v. 8 visits (voortgangsbalk)
 RULES = {"nz": "new-zealand", "ing": "chinese"}
@@ -150,7 +149,7 @@ class BatchJudge(judge.Judge):
 
 def analyse(size, moves, komi, rules, human, eng, progress, stop):
     """Volledige review van een pot. moves: [(x,y)] (x<0 = pass). progress(0..1)."""
-    gm = [[goban.letter(goban.color_at(i)), "pass" if x < 0 else f"{LETTERS[x]}{size - y}"]
+    gm = [[goban.letter(goban.color_at(i)), goban.to_gtp(x, y, size)]
           for i, (x, y) in enumerate(moves)]
     n_mine = sum(1 for i in range(len(moves)) if goban.color_at(i) == human)
     est = min(20, max(2, n_mine // 5))          # schatting eigen mistakes/blunders; zie rebase
@@ -193,7 +192,7 @@ def analyse_ogs(gid, eng, progress, stop):
     mid = ogs.me().get("id")
     human = 1 if gd["players"]["black"]["id"] == mid else 2
     moves = [(m[0], m[1]) for m in gd.get("moves", [])]
-    rules = RULES.get(gd.get("rules"), gd.get("rules") or "japanese")
+    rules = RULES.get(gd.get("rules"), gd.get("rules") or goban.RULES)
     r = analyse(size, moves, gd.get("komi", 6.5), rules, human, eng, progress, stop)
     if not r:
         return None, "too short"

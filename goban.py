@@ -4,6 +4,15 @@ Kleuren: 0 leeg, 1 zwart, 2 wit. y=0 is boven (OGS-conventie).
 """
 
 
+COLS = "ABCDEFGHJKLMNOPQRST"     # GTP-kolommen (zonder I)
+RULES = "japanese"               # voor alle potten die we zelf aanmaken: OGS en offline
+
+
+def to_gtp(x, y, size):
+    """(x, y) -> 'D4'; x < 0 = pass. y=0 is boven, GTP telt van onder."""
+    return "pass" if x < 0 else f"{COLS[x]}{size - y}"
+
+
 def color_at(t, handicap=0):
     """Kleur van zet t. Handicap (OGS-vorm): de eerste N zetten zijn de zwarte stenen, dan begint wit."""
     if handicap:

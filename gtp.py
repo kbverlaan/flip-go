@@ -9,9 +9,10 @@ import subprocess
 import threading
 import time
 
+import goban
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ENG = os.path.join(HERE, "engines")
-LETTERS = "ABCDEFGHJKLMNOPQRST"
 
 # Offline tegenstanders: (label, kind, arg). gnugo-arg = level, katago-arg = human-profiel.
 # Bergnamen = MiniGo-bergenladder (humanlike-net speelt als een mens van die rank).
@@ -57,15 +58,11 @@ def available():
     return [b for b in BOTS if have[b[1]] and (not _needs_patch(b) or _weak_ok())]
 
 
-def to_gtp(x, y, size):
-    return "pass" if x < 0 else f"{LETTERS[x]}{size - y}"
-
-
 def from_gtp(v, size):
     v = v.strip().upper()
     if v in ("PASS", "RESIGN"):
         return v.lower()
-    return LETTERS.index(v[0]), size - int(v[1:])
+    return goban.COLS.index(v[0]), size - int(v[1:])
 
 
 class Engine:
@@ -76,7 +73,7 @@ class Engine:
         self.gpu = False
         if kind == "gnugo":
             cmd = [os.path.join(ENG, "gnugo"), "--mode", "gtp", "--level", str(arg),
-                   "--japanese-rules"]
+                   f"--{goban.RULES}-rules"]
         else:   # humanlike-net als enig net, 1 visit = zet uit de menselijke policy
             # GPU (OpenCL FP16, Mali): 13x13 1,1 s i.p.v. 1,8 s en ~120 MB minder RAM.
             # Direct op de bordmaat starten: omschakelen kost 13 s (CPU) tot 27 s (GPU).
@@ -108,7 +105,7 @@ class Engine:
         self.cmd(f"boardsize {size}")
         self.cmd("clear_board")
         if self.kind == "katago":
-            self.cmd("kata-set-rules japanese")     # zoals de OGS-potten
+            self.cmd(f"kata-set-rules {goban.RULES}")     # zoals de OGS-potten
         self.cmd(f"komi {komi}")
         return True
 
@@ -135,7 +132,7 @@ class Engine:
         return resp.startswith("="), resp[1:].strip()
 
     def play(self, color, x, y):
-        return self.cmd(f"play {color} {to_gtp(x, y, self.size)}")[0]
+        return self.cmd(f"play {color} {goban.to_gtp(x, y, self.size)}")[0]
 
     def genmove(self, color):
         ok, v = self.cmd(f"genmove {color}")

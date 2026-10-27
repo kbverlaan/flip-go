@@ -60,7 +60,7 @@ def board_bg(n):
             num = str(n - i)
             x = (o - r - retro.tiny_w(num)) // 2 if roomy else o - r + 1
             retro.tiny(bg, num, x, o + i * c - 2)
-            retro.tiny(bg, review.LET[i], o + i * c - 1, ly)
+            retro.tiny(bg, goban.COLS[i], o + i * c - 1, ly)
         _BG[n] = bg
     return _BG[n]
 
@@ -430,7 +430,7 @@ class NewGameScene:
     def draw(self, s):
         s.fill(PAL["screen"])
         retro.text_c(s, "NEW GAME", W // 2, 14, PAL["box"])
-        retro.hint(s, f"{{l}} {new_size}x{new_size} {{r}} ranked - japanese", W // 2, 34, PAL["text_dim"], "c")
+        retro.hint(s, f"{{l}} {new_size}x{new_size} {{r}} ranked - {goban.RULES}", W // 2, 34, PAL["text_dim"], "c")
         for i, (name, desc) in enumerate(self.OPTIONS):
             y = 54 + i * 40
             retro.dialog_box(s, (60, y, 200, 36))
@@ -717,7 +717,7 @@ class GameScene:
         self.names = ("black", "white")
         self.komi = 6.5
         self.times = ("", "")
-        self.rules = "japanese"
+        self.rules = goban.RULES
         self.speed = ""
         self.my_color = 1
         self.my_turn = False
@@ -780,7 +780,7 @@ class GameScene:
                 **({"cx": size // 2, "cy": size // 2} if size != self.size else {}),
                 names=(pl.get("black", {}).get("username", "?"),
                        pl.get("white", {}).get("username", "?")),
-                komi=float(gd.get("komi", 6.5)), rules=gd.get("rules", "japanese"),
+                komi=float(gd.get("komi", 6.5)), rules=gd.get("rules", goban.RULES),
                 speed=ogs.speed_label(gd.get("time_control", {}).get("speed", "")),
                 phase=phase, outcome=gd.get("outcome", ""),
                 winner_id=gd.get("winner"), black_id=black_id, me_id=me_id,
@@ -912,7 +912,7 @@ class GameScene:
         return self
 
     def _coord(self, x, y):
-        return "ABCDEFGHJKLMNOPQRST"[x] + str(self.size - y)
+        return goban.to_gtp(x, y, self.size)
 
     # ---------- draw ----------
     def _plate(self, s, y, color, name, caps, to_move):
@@ -1134,7 +1134,7 @@ class OfflineGameScene(GameScene):
         self.names = ("you", bot[0][:8]) if self.human == 1 else (bot[0][:8], "you")
         self.me_id, self.black_id = self.human, 1
         self.komi = self.komi_for(handicap)
-        self.rules, self.speed = "japanese", "offline"
+        self.rules, self.speed = goban.RULES, "offline"
         self.result = None             # (winner_kleur, 'x points'|'Resignation')
         self.review = None
         self.eng = None
@@ -1315,7 +1315,7 @@ CLS_COL = {"best": "green", "good": "text_dim", "inacc": "yellow", "mistake": "o
 
 
 def _coord(pt, n):
-    return review.LET[pt[0]] + str(n - pt[1]) if pt else "pass"
+    return goban.to_gtp(*pt, n) if pt else "pass"
 
 
 def _draw_board(s, n, board, marks=()):

@@ -17,6 +17,8 @@ from pathlib import Path
 
 import requests
 
+import goban
+
 BASE = "https://online-go.com/api/v1"
 CLIENT_ID = "3SKcBAGtYW2QmKiiYiqy5Q72hzpIgXwohQ7ZpGrr"
 REDIRECT = "http://localhost:8642/callback"
@@ -309,7 +311,7 @@ def _challenge_body(speed, size, ranked):
     return {
         "challenger_color": "automatic",
         "game": {
-            "name": "flip-go", "rules": "japanese", "ranked": ranked,
+            "name": "flip-go", "rules": goban.RULES, "ranked": ranked,
             "width": size, "height": size, "handicap": 0, "komi_auto": "automatic",
             "disable_analysis": False, "initial_state": None, "private": False,
             "time_control": "fischer",

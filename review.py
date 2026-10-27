@@ -13,7 +13,6 @@ import time
 
 import goban
 
-LET = "ABCDEFGHJKLMNOPQRST"
 CATS = {   # label + twee regels uitleg, elk <= 10 tekens (past in het zijpaneel bij 8px)
     "selfatari": ("Self-atari", "Own stones", "in atari"),
     "atari": ("Atari", "Capture or", "save group"),
@@ -85,7 +84,7 @@ def phase_of(t, board, size):
 def gtp_xy(m, size):
     if not m or m.lower() == "pass":
         return None
-    return LET.index(m[0].upper()), size - int(m[1:])
+    return goban.COLS.index(m[0].upper()), size - int(m[1:])
 
 
 def _libs(board, x, y):

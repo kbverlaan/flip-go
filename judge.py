@@ -13,10 +13,11 @@ import subprocess
 import threading
 import time
 
+import goban
+
 ENG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "engines")
 JUDGE_NET = "b6c96.bin.gz"
 JUDGE_CFG = "judge_analysis.cfg"
-LETTERS = "ABCDEFGHJKLMNOPQRST"
 VISITS = 8           # genoeg voor pass/opgave/grove blunders; ~0,7 s op 13x13 (Flip)
 TEMPERATURE = 0.8      # trekken uit de menselijke policy (lager = vaker de topzet)
 TRIES = 4              # max. aantal menselijke kandidaten dat we laten keuren
@@ -48,7 +49,7 @@ class Judge:
             if self.p.poll() is not None:
                 raise OSError("judge stopped")
             self.qid += 1
-            q = dict(id=str(self.qid), moves=moves, rules="japanese", komi=komi,
+            q = dict(id=str(self.qid), moves=moves, rules=goban.RULES, komi=komi,
                      boardXSize=size, boardYSize=size, maxVisits=visits or VISITS,
                      analyzeTurns=[len(moves)])
             q.update(extra or {})
@@ -91,7 +92,7 @@ class JudgedEngine:
         return ok
 
     def _gtp(self, x, y):
-        return "pass" if x < 0 else f"{LETTERS[x]}{self.size - y}"
+        return goban.to_gtp(x, y, self.size)
 
     def play(self, color, x, y):
         if not self.human.play(color, x, y):
