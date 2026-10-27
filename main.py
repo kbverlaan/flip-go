@@ -184,13 +184,10 @@ _net = {"down": False}      # laatste OGS-verzoek mislukt (ook op de Mac, zonder
 def draw_nowifi(s):
     """'no wifi' rechtsonder op de menupagina's, zoals in HISTORY."""
     if _net["down"]:
-        retro.text_r(s, "no wifi", 316, 228, PAL["accent"])
+        retro.status(s, "no wifi", PAL["accent"])
 
 
-def arrow(s, x, y, color=None):
-    """Pokemon-cursor: klein driehoekje."""
-    c = color or PAL["text"]
-    pygame.draw.polygon(s, c, [(x, y), (x, y + 8), (x + 5, y + 4)])
+arrow = retro.arrow
 
 
 class TitleScene:
@@ -215,8 +212,8 @@ class TitleScene:
         retro.text_c(s, "an OGS client", W // 2, 38, PAL["text_dim"])
         if int((time.monotonic() - self.t0) * 2) % 2 == 0:     # 0,5 s aan, 0,5 s uit
             retro.text_c(s, "PRESS START", W // 2, 205, PAL["box"])
-        retro.hint(s, "{Y} quit", 4, 228, PAL["text_dim"])
-        retro.text_r(s, f"v {VERSION}", 316, 228, PAL["text_dim"])
+        retro.foot(s, "{Y} quit")
+        retro.status(s, f"v {VERSION}")
         draw_status(s)
 
 
@@ -305,47 +302,39 @@ class GamesScene:
 
     def draw(self, s):
         s.fill(PAL["screen"])
-        retro.text_c(s, "YOUR GAMES", W // 2, 14, PAL["box"])
+        retro.title(s, "YOUR GAMES")
+        if self.me_label:
+            retro.subtitle(s, self.me_label)
         draw_status(s)
         if self.games is None:
-            retro.text_c(s, "loading" + "." * (int((time.monotonic() - self.t0) * 3) % 4), W // 2, 110, PAL["text_dim"])
+            retro.status(s, "loading" + "." * (int((time.monotonic() - self.t0) * 3) % 4))
             return
         rows = self._rows()
-        off = max(0, min(self.sel - 3, len(rows) - 4))
-        for i, (kind, data) in enumerate(rows[off:off + 4]):
-            y = 44 + i * 30
-            retro.dialog_box(s, (16, y, 288, 26))
-            if i + off == self.sel:
-                arrow(s, 24, y + 9)
+        off = max(0, min(self.sel - 3, len(rows) - 6))          # 6 zichtbaar, scrollt
+        for i, (kind, data) in enumerate(rows[off:off + 6]):
+            y, sel = retro.row_y(i), i + off == self.sel
             if kind == "offline":
-                retro.text(s, f"vs {data[1][0]}", 36, y + 9)
-                retro.text_r(s, "offline", 296, y + 9, PAL["text_dim"])
+                retro.row(s, y, f"vs {data[1][0]}", "offline", selected=sel, wide=True)
             elif kind == "game":
-                retro.text(s, f"vs {data['opp'][:19]}", 36, y + 9)
                 if data["my_turn"] and data.get("left"):
-                    retro.text_r(s, retro.fmt_time(data["left"]), 296, y + 9)
+                    val, col = retro.fmt_time(data["left"]), PAL["text"]
                 elif data["my_turn"]:
-                    retro.text(s, "*", 288, y + 9, PAL["accent"])
+                    val, col = "*", PAL["accent"]
                 else:
-                    retro.text_r(s, data["speed"], 296, y + 9, PAL["text_dim"])
+                    val, col = data["speed"], None
+                retro.row(s, y, f"vs {data['opp'][:19]}", val, selected=sel, wide=True, value_col=col)
             elif kind == "seek":
                 if self.stopping == data["id"]:
-                    retro.text(s, "stopping...", 36, y + 9, PAL["text_dim"])
+                    retro.row(s, y, "stopping...", selected=sel, wide=True, label_col=PAL["text_dim"])
                 elif self.cancelq == data["id"]:
-                    retro.text(s, "stop seeking? A/B", 36, y + 9, PAL["accent"])
+                    retro.row(s, y, "stop seeking? A/B", selected=sel, wide=True, label_col=PAL["accent"])
                 else:
-                    retro.text(s, "seeking", 36, y + 9, PAL["text_dim"])
-                    retro.text(s, data["speed"], 240, y + 9, PAL["text_dim"])
-        # footer: twee boxen naast elkaar, gameboy-stijl
+                    retro.row(s, y, "seeking", data["speed"], selected=sel, wide=True,
+                              label_col=PAL["text_dim"])
         on_footer = self.sel == len(rows)
         left_label = "OFFLINE" if self.error else "NEW GAME"
-        for f, (bx, label) in enumerate(((16, left_label), (164, "HISTORY"))):
-            retro.dialog_box(s, (bx, 192, 140, 26))
-            if on_footer and self.fsel == f:
-                arrow(s, bx + 10, 192 + 9)
-            retro.text_c(s, label, bx + 76, 192 + 9)
-        if self.me_label:
-            retro.text_c(s, self.me_label, W // 2, 226, PAL["text_dim"])
+        for f, (bx, label) in enumerate(((8, left_label), (162, "HISTORY"))):
+            retro.button(s, bx, 150, label, on_footer and self.fsel == f)
         draw_nowifi(s)
 
 
@@ -390,14 +379,12 @@ class NewGameScene:
         self.back = back or GamesScene
         self.sel = 0
         self.busy = False
-        self.done = False
         self.msg = None
+        self.goto = None
 
     def handle(self, ev):
         if ev.type != pygame.KEYDOWN:
             return self
-        if self.done:
-            return GamesScene()
         if ev.key in B_KEYS:
             return self.back()
         if self.busy:
@@ -415,33 +402,28 @@ class NewGameScene:
             if self.OPTIONS[self.sel][0] == "offline":
                 return OfflineScene()
             self.busy = True
-            self.msg = "Posting..."
+            self.msg = "posting..."
             threading.Thread(target=self._create, daemon=True).start()
         return self
 
     def _create(self):
         try:
             ogs.create_challenge(self.OPTIONS[self.sel][0], new_size)
-            self.msg = "Posted. Any key: games"
-            self.done = True
+            self.goto = GamesScene()            # daar staat de zoekopdracht als 'seeking'
         except Exception:
-            self.msg = "Failed"
+            self.msg = "failed"
         self.busy = False
 
     def draw(self, s):
         s.fill(PAL["screen"])
-        retro.text_c(s, "NEW GAME", W // 2, 14, PAL["box"])
-        retro.hint(s, f"{{l}} {new_size}x{new_size} {{r}} ranked - {goban.RULES}", W // 2, 34, PAL["text_dim"], "c")
+        retro.title(s, "NEW GAME")
+        retro.subtitle(s, f"{{l}} {new_size}x{new_size} {{r}} ranked - {goban.RULES}")
         for i, (name, desc) in enumerate(self.OPTIONS):
-            y = 54 + i * 40
-            retro.dialog_box(s, (60, y, 200, 36))
-            if i == self.sel:
-                arrow(s, 68, y + 8)
-            retro.text(s, name.upper(), 80, y + 7)
-            retro.text(s, desc, 80, y + 21, PAL["text_dim"])
+            retro.row(s, retro.row_y(i, two=True), name.upper(), sub=desc, selected=i == self.sel)
         if self.msg:
-            retro.text_c(s, self.msg, W // 2, 210, PAL["text_dim"])
-        draw_nowifi(s)
+            retro.status(s, self.msg, PAL["accent"] if self.msg == "failed" else None)
+        else:
+            draw_nowifi(s)
 
 
 class BotScene:
@@ -452,7 +434,6 @@ class BotScene:
         self.flowers = ogs.FLOWERS
         self.sel = 3      # Bouvardia, de vaste sparringspartner
         self.busy = False
-        self.done = False
         self.msg = None
         self.ranks = {}
         self.goto = None
@@ -471,8 +452,6 @@ class BotScene:
     def handle(self, ev):
         if ev.type != pygame.KEYDOWN:
             return self
-        if self.done:
-            return GamesScene()
         if ev.key in B_KEYS:
             return self.back()
         if self.busy:
@@ -483,7 +462,7 @@ class BotScene:
             self.sel = max(0, self.sel - 1)
         elif ev.key in A_KEYS:
             self.busy = True
-            self.msg = "Challenging..."
+            self.msg = "challenging..."
             threading.Thread(target=self._challenge, daemon=True).start()
         return self
 
@@ -491,7 +470,7 @@ class BotScene:
         try:
             name, pid = self.flowers[self.sel]
             ogs.challenge_player(pid, "daily", new_size)
-            self.msg = "Starting..."
+            self.msg = "starting..."
             known = {g["id"] for g in ogs.my_games() if g["opp"] != name}
             for _ in range(20):     # bot accepteert doorgaans binnen seconden
                 time.sleep(1)
@@ -500,27 +479,21 @@ class BotScene:
                         self.goto = GameScene(g["id"])
                         self.busy = False
                         return
-            self.msg = "No response"
+            self.msg = "no response"
         except Exception:
-            self.msg = "Failed"
+            self.msg = "failed"
         self.busy = False
 
     def draw(self, s):
         s.fill(PAL["screen"])
-        retro.text_c(s, "FLOWER LADDER", W // 2, 14, PAL["box"])
-        retro.text_c(s, f"{new_size}x{new_size}", W // 2, 28, PAL["text_dim"])
-        for i, (name, _) in enumerate(self.flowers):
-            y = 44 + i * 26
-            retro.dialog_box(s, (64, y, 192, 22))
-            if i == self.sel:
-                arrow(s, 72, y + 7)
-            retro.text(s, name, 84, y + 7)
-            rk = self.ranks.get(self.flowers[i][1])
-            if rk:
-                retro.text_r(s, rk, 248, y + 7, PAL["text_dim"])
+        retro.title(s, "FLOWER LADDER")
+        retro.subtitle(s, f"{new_size}x{new_size}")
+        for i, (name, pid) in enumerate(self.flowers):
+            retro.row(s, retro.row_y(i), name, self.ranks.get(pid), selected=i == self.sel)
         if self.msg:
-            retro.text_c(s, self.msg, W // 2, 218, PAL["text_dim"])
-        draw_nowifi(s)
+            retro.status(s, self.msg, PAL["accent"] if self.msg == "failed" else None)
+        else:
+            draw_nowifi(s)
 
 
 class PastGame:
@@ -647,9 +620,9 @@ class HistoryScene:
 
     def draw(self, s):
         s.fill(PAL["screen"])
-        retro.text_c(s, "HISTORY", W // 2, 6, PAL["box"])
+        retro.title(s, "HISTORY", data=True)
         if self.rows is None:
-            retro.text_c(s, "loading" + "." * (int((time.monotonic() - self.t0) * 3) % 4), W // 2, 110, PAL["text_dim"])
+            retro.status(s, "loading" + "." * (int((time.monotonic() - self.t0) * 3) % 4))
             return
         if time.monotonic() - getattr(self, "_seen", 0) > 1:      # bestanden 1x/s lezen, niet per frame
             self._seen = time.monotonic()
@@ -657,48 +630,45 @@ class HistoryScene:
             self._lpm = {r.get("key"): (r["loss_per_move"], review.accuracy(r))
                          for r in review.history(analyse.REVIEWS, n=100000)}
         done, lpm = self._done, self._lpm
-        off = max(0, min(self.sel - 3, len(self.rows) - 7))
-        for i, r in enumerate(self.rows[off:off + 7]):
-            y = 22 + i * 28
-            retro.dialog_box(s, (8, y, 304, 24))
-            if i + off == self.sel:
-                arrow(s, 14, y + 8)
+        off = max(0, min(self.sel - 3, len(self.rows) - 8))      # 8 zichtbaar, scrollt
+        for i, r in enumerate(self.rows[off:off + 8]):
+            _, y = retro.row(s, retro.row_y(i, top=retro.DATA_Y), None, selected=i + off == self.sel, wide=True)
             if r["key"] == "all":
                 todo = len(self._todo())
                 w = analyse.worker
-                retro.text(s, "ANALYSE ALL", 28, y + 8)
+                retro.text(s, "ANALYSE ALL", 28, y)
                 if w.busy():
                     p = w.status.get(w.cur)
-                    retro.text_r(s, f"{len(w.queue) + (w.cur is not None)} to go", 304, y + 8, PAL["text_dim"])
+                    retro.text_r(s, f"{len(w.queue) + (w.cur is not None)} to go", 304, y, PAL["text_dim"])
                     if isinstance(p, float):
-                        bar(s, 150, y + 8, 70, p)
+                        bar(s, 150, y, 70, p)
                 else:
                     msg = "needs wifi" if self.offline else (f"{todo} new" if todo else "all done")
-                    retro.text_r(s, msg, 304, y + 8, PAL["text_dim"])
+                    retro.text_r(s, msg, 304, y, PAL["text_dim"])
                 continue
-            retro.text(s, "won " if r.get("won") else "lost", 28, y + 8,
+            retro.text(s, "won " if r.get("won") else "lost", 28, y,
                        PAL["green"] if r.get("won") else PAL["accent"])
-            retro.text(s, f"{r['opp'][:11]}", 68, y + 8)
-            retro.text(s, f"{r.get('size') or '?'}" + ("" if r.get("src") == "ogs" else "*"), 166, y + 8,
+            retro.text(s, f"{r['opp'][:11]}", 68, y)
+            retro.text(s, f"{r.get('size') or '?'}" + ("" if r.get("src") == "ogs" else "*"), 166, y,
                        PAL["text_dim"])
             st = analyse.worker.status.get(r.get("id")) if r.get("src") == "ogs" else None
             if r["key"] in done:
                 v = lpm.get(r["key"])
                 txt = (f"{v[1]:.0f}%" if view_pct and v[1] is not None else f"{v[0]:.1f}/mv") if v else "ok"
-                retro.text_r(s, txt, 304, y + 8)
+                retro.text_r(s, txt, 304, y)
             elif isinstance(st, float):
-                bar(s, 234, y + 8, 70, st)
+                bar(s, 234, y, 70, st)
             elif st == "queued":
-                retro.text_r(s, "queued", 304, y + 8, PAL["text_dim"])
+                retro.text_r(s, "queued", 304, y, PAL["text_dim"])
             elif st:
-                retro.text_r(s, st[:9], 304, y + 8, PAL["text_dim"])
+                retro.text_r(s, st[:9], 304, y, PAL["text_dim"])
             else:
-                retro.text_r(s, r.get("result", "")[:9], 304, y + 8, PAL["text_dim"])
-        retro.hint(s, "{A} review  {START} stats  {X} " + ("pts" if view_pct else "%"), 4, 228, PAL["text_dim"])
+                retro.text_r(s, r.get("result", "")[:9], 304, y, PAL["text_dim"])
+        retro.foot(s, "{A} review  {START} stats  {X} " + ("pts" if view_pct else "%"))
         if self.offline:
             draw_nowifi(s)
         else:
-            retro.text_r(s, "* offline", 316, 228, PAL["text_dim"])
+            retro.status(s, "* offline")
 
 
 class GameScene:
@@ -1070,31 +1040,26 @@ class OfflineScene:
 
     def draw(self, s):
         s.fill(PAL["screen"])
-        retro.text_c(s, "OFFLINE", W // 2, 14, PAL["box"])
+        retro.title(s, "OFFLINE")
         hc = handicap_for(new_size)
         komi = f"komi {OfflineGameScene.komi_for(hc):g}"
-        retro.hint(s, f"{{l}} {new_size}x{new_size} {{r}}  " + (f"{hc} stones - {komi}" if hc else
-                   f"even - {komi}"), W // 2, 34, PAL["accent"] if hc else PAL["text_dim"], "c")
+        retro.subtitle(s, f"{{l}} {new_size}x{new_size} {{r}}  " + (f"{hc} stones - {komi}" if hc else
+                       f"even - {komi}"), PAL["accent"] if hc else None)
         if not self.rows:
             retro.text_c(s, "no engine installed", W // 2, 100, PAL["text_dim"])
         off = max(0, min(self.sel - 3, len(self.rows) - 7))      # 7 zichtbaar, scrollt
         for i, (kind, bot) in enumerate(self.rows[off:off + 7], off):
-            y = 48 + (i - off) * 22
-            retro.dialog_box(s, (64, y, 192, 20))
-            if i == self.sel:
-                arrow(s, 72, y + 6)
+            y, sel = retro.row_y(i - off), i == self.sel
             if kind == "continue":
                 sv = self.saved
-                retro.text(s, "CONTINUE", 84, y + 6)
                 hc = f" H{sv['handicap']}" if sv.get("handicap") else ""
-                retro.text_r(s, f"{sv['size']}x{sv['size']}{hc}", 248, y + 6, PAL["text_dim"])
+                retro.row(s, y, "CONTINUE", f"{sv['size']}x{sv['size']}{hc}", selected=sel)
             else:
-                retro.text(s, bot[0], 84, y + 6)
-                retro.text_r(s, gtp.level(bot), 248, y + 6, PAL["text_dim"])
-        retro.hint(s, "{START} stats  {X} stones", 4, 228, PAL["text_dim"])
+                retro.row(s, y, bot[0], gtp.level(bot), selected=sel)
+        retro.foot(s, "{START} stats  {X} stones")
         if any(b[1] == "katago" for _, b in self.rows if b) and not gtp.is_warm():
-            if not load_bar(s, 236, 228, 80):
-                retro.text_r(s, "loading bot...", 316, 228, PAL["text_dim"])
+            if not load_bar(s, 236, retro.FOOT_Y, 80):
+                retro.status(s, "loading bot...")
         else:
             draw_nowifi(s)
 
@@ -1359,14 +1324,13 @@ class GameReviewScene:
         g, r = self.game, self.game.review
         human = getattr(g, "human", 1)
         res = "won" if g.result and g.result[0] == human else "lost"
-        retro.text_c(s, "REVIEW", W // 2, 6, PAL["box"])
+        retro.title(s, "REVIEW", data=True)
         retro.hint(s, "{X} " + ("pts" if view_pct else "%"), 316, 6, PAL["text_dim"], "r")
         retro.text_c(s, f"vs {g.bot[0]}  {g.size}x{g.size}  {res}", W // 2, 20, PAL["text_dim"])
         if r is None or r.get("error"):
             retro.text_c(s, r["error"] if r else "analysing", W // 2, 110, PAL["text_dim"])
             if r is None and getattr(g, "analysing", None) is not None:
                 bar(s, 110, 124, 100, g.analysing)
-            retro.text(s, "B back", 4, 228, PAL["text_dim"])
             return
         # stand (jouw perspectief: omhoog = jij voor), as in punten, vlak groen/rood
         retro.dialog_box(s, (8, 32, 304, 58))
@@ -1575,12 +1539,11 @@ class StatsScene:
         s.fill(PAL["screen"])
         src, lab = self.SRC[self.src]
         h = review.history(analyse.REVIEWS, self.size, 20, src)
-        retro.text_c(s, "STATS", W // 2, 6, PAL["box"])
+        retro.title(s, "STATS", data=True)
         retro.hint(s, f"{{l}} {self.size}x{self.size} {{r}}  {{u}} {lab} {{d}}  {len(h)} games", W // 2, 20,
                    PAL["text_dim"], "c")
         if not h:
             retro.text_c(s, "no reviews yet", W // 2, 110, PAL["text_dim"])
-            retro.text(s, "B back", 4, 228, PAL["text_dim"])
             return
         mean = lambda v: sum(v) / len(v) if v else None
         pct = view_pct

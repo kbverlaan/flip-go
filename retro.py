@@ -183,3 +183,76 @@ def hint(surf, s, x, y, color=None, align="l", bg=None):
         x += pw(p)
 
 
+
+
+# ---------- design system ----------
+# Elk scherm gebruikt deze maten en onderdelen in plaats van eigen getallen. Raster: het 8px-font,
+# maten in veelvouden van 2. Schrijfregels: TITELS en ACTIES in hoofdletters; data, hints en
+# status in kleine letters, zonder punt.
+#
+#   Kop     menu: titel y 14, ondertitel y 30, lijst vanaf y 46.
+#           datascherm (HISTORY, REVIEW, STATS): titel y 6, inhoud vanaf y 22.
+#   Lijst   smalle menuregel 208 breed (gecentreerd), brede dataregel 304. Regel 20 hoog,
+#           of 36 met een ondertitel; 4 ertussen. Pijl op x+8, label op x+20, waarde rechts op x+w-8.
+#   Onder   y 228: knoppenhints links, status rechts (laden, versturen, fouten, no wifi).
+#           Knoppen (YOUR GAMES) op y 200, 20 hoog.
+TITLE_Y, SUB_Y, LIST_Y = 14, 30, 46
+DATA_TITLE_Y, DATA_Y = 6, 22
+FOOT_Y, LEFT, RIGHT = 228, 4, 316
+BUTTON_Y = 200
+MENU, WIDE = (56, 208), (8, 304)          # (x, breedte)
+ROW_H, ROW2_H, GAP = 20, 36, 4
+
+
+def arrow(surf, x, y, color=None):
+    """Cursor: klein driehoekje, even hoog als een tekstregel."""
+    pygame.draw.polygon(surf, color or PAL["text"], [(x, y), (x, y + 8), (x + 5, y + 4)])
+
+
+def title(surf, s, data=False):
+    text_c(surf, s, W // 2, DATA_TITLE_Y if data else TITLE_Y, PAL["box"])
+
+
+def subtitle(surf, s, color=None):
+    hint(surf, s, W // 2, SUB_Y, color or PAL["text_dim"], "c")
+
+
+def row_y(i, two=False, top=LIST_Y):
+    """y van lijstregel i (two = regels met ondertitel)."""
+    return top + i * ((ROW2_H if two else ROW_H) + GAP)
+
+
+def row(surf, y, label, value=None, sub=None, selected=False, wide=False,
+        label_col=None, value_col=None):
+    """Lijstregel: vak, pijl als hij gekozen is, label links, waarde rechts, ondertitel eronder.
+    -> (x, tekst-y) voor wat een scherm er zelf nog in tekent (kolommen, balkjes)."""
+    x, w = WIDE if wide else MENU
+    dialog_box(surf, (x, y, w, ROW2_H if sub else ROW_H))
+    ty = y + (7 if sub else 6)
+    if selected:
+        arrow(surf, x + 8, ty)
+    if label:
+        text(surf, label, x + 20, ty, label_col)
+    if value:
+        text_r(surf, value, x + w - 8, ty, value_col or PAL["text_dim"])
+    if sub:
+        text(surf, sub, x + 20, ty + 14, PAL["text_dim"])
+    return x, ty
+
+
+def button(surf, x, w, label, selected=False):
+    """Knop op de knoppenregel (YOUR GAMES): label in het midden, pijl als hij gekozen is."""
+    dialog_box(surf, (x, BUTTON_Y, w, ROW_H))
+    if selected:
+        arrow(surf, x + 8, BUTTON_Y + 6)
+    text_c(surf, label, x + w // 2, BUTTON_Y + 6)
+
+
+def foot(surf, s):
+    """Knoppenhints op de onderste regel, links."""
+    hint(surf, s, LEFT, FOOT_Y, PAL["text_dim"])
+
+
+def status(surf, s, color=None):
+    """Status op de onderste regel, rechts."""
+    text_r(surf, s, RIGHT, FOOT_Y, color or PAL["text_dim"])
