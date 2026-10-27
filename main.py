@@ -540,7 +540,7 @@ class PastGame:
         if r:
             self.moves = [tuple(m) for m in r["game_moves"]]
             self.size, self.human = r["size"], r.get("human", 1)
-            self.result = (self.human if r.get("won") else 3 - self.human,)
+            self.result = (self.human if r.get("won") else goban.other(self.human),)
         else:
             self.moves, self.human = [], 1
             self.result = (1 if self.row.get("won") else 2,)
@@ -919,7 +919,7 @@ class GameScene:
         retro.dialog_box(s, (224, y, 92, 34))
         if to_move and self.phase == "play":
             arrow(s, 227, y + 7, PAL["accent"])
-        retro.stone(s, 238, y + 11, 4, "B" if color == 1 else "W")
+        retro.stone(s, 238, y + 11, 4, goban.letter(color))
         retro.text(s, name[:8], 244, y + 7)
         retro.text(s, f"c:{caps}", 238, y + 20, PAL["text_dim"])
         retro.text_r(s, self.times[color - 1], 312, y + 20,
@@ -944,7 +944,7 @@ class GameScene:
             for x in range(n):
                 if self.board[y][x]:
                     retro.stone(s, ox + x * c, oy + y * c, r,
-                                "B" if self.board[y][x] == 1 else "W")
+                                goban.letter(self.board[y][x]))
         if self.last:
             lx, ly = self.last
             col = PAL["white_sh"] if self.board[ly][lx] == 1 else PAL["black_hi"]
@@ -954,7 +954,7 @@ class GameScene:
             can_play = (self.my_turn and self.phase == "play" and not self.busy
                         and self.board[self.cy][self.cx] == 0)
             if can_play:
-                retro.stone(s, px, py, r, "B" if self.my_color == 1 else "W")
+                retro.stone(s, px, py, r, goban.letter(self.my_color))
             else:
                 a = PAL["accent"]
                 d, k = c // 2 - 1, (4 if c >= 20 else 3)
@@ -1147,7 +1147,7 @@ class OfflineGameScene(GameScene):
         try:
             self.eng = gtp.get_engine(self.bot[1], self.bot[2], self.size, self.komi)
             for i, (x, y) in enumerate(self.moves):
-                self.eng.play("B" if review.color_at(i, self.handicap) == 1 else "W", x, y)
+                self.eng.play(goban.letter(goban.color_at(i, self.handicap)), x, y)
             if self._turn() != self.human:
                 self._bot_move()
             elif hasattr(self.eng, "eval_async"):
@@ -1159,14 +1159,14 @@ class OfflineGameScene(GameScene):
         self.busy = False
 
     def _turn(self):
-        return review.color_at(len(self.moves), self.handicap)
+        return goban.color_at(len(self.moves), self.handicap)
 
     def _passes(self):
         return len(self.moves) >= 2 and self.moves[-1][0] < 0 and self.moves[-2][0] < 0
 
     def _finish(self, winner=None, how=None):
         if winner is None:             # twee keer gepast: engine telt
-            sc = self.eng.score() or ("B" if self.human == 1 else "W") + "+0"
+            sc = self.eng.score() or goban.letter(self.human) + "+0"
             winner = 1 if sc[0] == "B" else 2
             how = f"{sc[2:]} points"
         self.result = (winner, how)
@@ -1221,9 +1221,9 @@ class OfflineGameScene(GameScene):
             self.review = {"error": "review failed"}
 
     def _bot_move(self):
-        bot = 3 - self.human
+        bot = goban.other(self.human)
         self._snap = {"msg": "Thinking...", "my_turn": False, "turn_color": bot}
-        mv = self.eng.genmove("B" if bot == 1 else "W")
+        mv = self.eng.genmove(goban.letter(bot))
         if mv == "resign":
             self._finish(self.human, "Resignation")
             return
@@ -1252,7 +1252,7 @@ class OfflineGameScene(GameScene):
             phase="finished" if self.result else "play",
             outcome=self.result[1] if self.result else "",
             winner_id=self.result[0] if self.result else None,
-            my_color=self.human, my_turn=mine, turn_color=self.human if mine else 3 - self.human,
+            my_color=self.human, my_turn=mine, turn_color=self.human if mine else goban.other(self.human),
             times=("", ""),
             msg=("The end." if self.result else
                  "Bot passed" if mine and bot_passed else
@@ -1260,7 +1260,7 @@ class OfflineGameScene(GameScene):
 
     def _do(self, action):
         try:
-            me = "B" if self.human == 1 else "W"
+            me = goban.letter(self.human)
             if action[0] == "move":
                 if not self.eng.play(me, action[1], action[2]):
                     self._load()
@@ -1277,7 +1277,7 @@ class OfflineGameScene(GameScene):
                 else:
                     self._bot_move()
             elif action[0] == "resign":
-                self._finish(3 - self.human, "Resignation")
+                self._finish(goban.other(self.human), "Resignation")
             self._save()
             self._load()
         except OSError as e:          # engine gestorven: opnieuw starten, zetten herspelen
@@ -1325,7 +1325,7 @@ def _draw_board(s, n, board, marks=()):
     for y in range(n):
         for x in range(n):
             if board[y][x]:
-                retro.stone(s, ox + x * c, oy + y * c, rr, "B" if board[y][x] == 1 else "W")
+                retro.stone(s, ox + x * c, oy + y * c, rr, goban.letter(board[y][x]))
     for kind, pt, extra in marks:
         if not pt:
             continue
@@ -1454,7 +1454,7 @@ class WalkScene:
         for t, (x, y) in enumerate(g.moves):
             out.append([row[:] for row in b])
             if x >= 0:
-                goban.apply_move(b, x, y, review.color_at(t, self.H))
+                goban.apply_move(b, x, y, goban.color_at(t, self.H))
         out.append(b)
         return out
 
@@ -1487,12 +1487,12 @@ class WalkScene:
 
     def draw(self, s):
         g, n, t = self.parent.game, self.n, self.t
-        mine = review.color_at(t, self.H) == self.r.get("human", 1)
+        mine = goban.color_at(t, self.H) == self.r.get("human", 1)
         row = self.rows.get(t) if mine else None      # bot-zet: geen klasse, ring of fouttype
         x, y = g.moves[t]
         played = None if x < 0 else (x, y)
-        col_me = "B" if review.color_at(t, self.H) == 1 else "W"
-        col_op = "W" if col_me == "B" else "B"
+        c = goban.color_at(t, self.H)
+        col_me, col_op = goban.letter(c), goban.letter(goban.other(c))
         marks = []
         cls = row["cls"] if row else None
         if self.better and row and row["answer"]:

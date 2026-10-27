@@ -114,7 +114,7 @@ def classify(board, n, played, answer, lost, prev, col):
     board = stand vóór de zet; played/answer/prev = (x,y) of None; col = speler aan zet (1/2)."""
     if played is None:
         return "passed"
-    size, opp = len(board), 3 - col
+    size, opp = len(board), goban.other(col)
     far = 3 if size <= 9 else 4
     dist = lambda a, b: max(abs(a[0] - b[0]), abs(a[1] - b[1])) if a and b else 99
     # 1. eigen stenen in atari gezet (zonder iets te slaan)
@@ -154,13 +154,6 @@ def classify(board, n, played, answer, lost, prev, col):
         return "bigpoint"
     return "local"
 
-def color_at(t, handicap=0):
-    """Kleur van zet t. Handicap (OGS-vorm): de eerste N zetten zijn de zwarte stenen, dan begint wit."""
-    if handicap:
-        return 1 if t < handicap else (2 if (t - handicap) % 2 == 0 else 1)
-    return 1 if t % 2 == 0 else 2
-
-
 HCAP_PTS = {2: "TR BL", 3: "TR BL BR", 4: "TR BL BR TL", 5: "TR BL BR TL C", 6: "TR BL BR TL L R",
             7: "TR BL BR TL L R C", 8: "TR BL BR TL L R T B", 9: "TR BL BR TL L R T B C"}
 
@@ -183,7 +176,7 @@ def compute(size, moves, evals, human=1, deep=None, handicap=0):
     board = [[0] * size for _ in range(size)]
     rows, prev = [], None
     for t, (x, y) in enumerate(moves):
-        col = color_at(t, handicap)
+        col = goban.color_at(t, handicap)
         played = None if x < 0 else (x, y)
         if t < handicap:                       # beginstenen: geen zet om te beoordelen
             goban.apply_move(board, x, y, 1)

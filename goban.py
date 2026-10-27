@@ -4,6 +4,22 @@ Kleuren: 0 leeg, 1 zwart, 2 wit. y=0 is boven (OGS-conventie).
 """
 
 
+def color_at(t, handicap=0):
+    """Kleur van zet t. Handicap (OGS-vorm): de eerste N zetten zijn de zwarte stenen, dan begint wit."""
+    if handicap:
+        return 1 if t < handicap else (2 if (t - handicap) % 2 == 0 else 1)
+    return 1 if t % 2 == 0 else 2
+
+
+def other(col):
+    return 3 - col
+
+
+def letter(col):
+    """1/2 -> 'B'/'W' (GTP, retro.stone)."""
+    return "B" if col == 1 else "W"
+
+
 def _nbrs(x, y, size):
     return [(nx, ny) for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1))
             if 0 <= nx < size and 0 <= ny < size]
@@ -33,7 +49,7 @@ def apply_move(board, x, y, col):
     board[y][x] = col
     caps = 0
     for nx, ny in _nbrs(x, y, size):
-        if board[ny][nx] == 3 - col:
+        if board[ny][nx] == other(col):
             grp, libs = _group(board, nx, ny)
             if not libs:
                 caps += len(grp)
@@ -53,11 +69,7 @@ def from_moves(size, moves, handicap=0):
     last = None
     for i, mv in enumerate(moves):
         x, y = int(mv[0]), int(mv[1])
-        first = 2 if handicap else 1     # na handicapstenen begint wit
-        if i < handicap:
-            col = 1
-        else:
-            col = first if (i - handicap) % 2 == 0 else 3 - first
+        col = color_at(i, handicap)
         caps[col] += apply_move(board, x, y, col)
         last = (x, y) if x >= 0 else None
     return board, caps[1], caps[2], last

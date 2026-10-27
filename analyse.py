@@ -12,6 +12,7 @@ import subprocess
 import threading
 import time
 
+import goban
 import judge
 import ogs
 import review
@@ -149,9 +150,9 @@ class BatchJudge(judge.Judge):
 
 def analyse(size, moves, komi, rules, human, eng, progress, stop):
     """Volledige review van een pot. moves: [(x,y)] (x<0 = pass). progress(0..1)."""
-    gm = [["B" if i % 2 == 0 else "W", "pass" if x < 0 else f"{LETTERS[x]}{size - y}"]
+    gm = [[goban.letter(goban.color_at(i)), "pass" if x < 0 else f"{LETTERS[x]}{size - y}"]
           for i, (x, y) in enumerate(moves)]
-    n_mine = sum(1 for i in range(len(moves)) if (i % 2 == 0) == (human == 1))
+    n_mine = sum(1 for i in range(len(moves)) if goban.color_at(i) == human)
     est = min(20, max(2, n_mine // 5))          # schatting eigen mistakes/blunders; zie rebase
     work = {"base": 0.0, "done": 0, "total": len(moves) + 1 + 2 * DEEP * est}
 
