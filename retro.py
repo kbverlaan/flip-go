@@ -195,7 +195,8 @@ def hint(surf, s, x, y, color=None, align="l", bg=None):
 #   Lijst   smalle menuregel 208 breed (gecentreerd), brede dataregel 304. Regel 20 hoog,
 #           of 36 met een ondertitel; 4 ertussen. Pijl op x+8, label op x+20, waarde rechts op x+w-8.
 #   Onder   y 228: knoppenhints links, status rechts (laden, versturen, fouten, no wifi).
-#           Knoppen (YOUR GAMES) op y 200, 20 hoog.
+#           Knoppen (YOUR GAMES) op y 200, 20 hoog. Een melding (notice) neemt de hele onderste
+#           regel over, in rood; het bord eindigt op y 226, dus hij valt er nooit overheen.
 TITLE_Y, SUB_Y, LIST_Y = 14, 30, 46
 DATA_TITLE_Y, DATA_Y = 6, 22
 FOOT_Y, LEFT, RIGHT = 228, 4, 316
@@ -256,3 +257,9 @@ def foot(surf, s):
 def status(surf, s, color=None):
     """Status op de onderste regel, rechts."""
     text_r(surf, s, RIGHT, FOOT_Y, color or PAL["text_dim"])
+
+
+def notice(surf, s):
+    """Melding over de hele onderste regel (wist hints en status), rood: 'hier moet je heen'."""
+    pygame.draw.rect(surf, PAL["screen"], (0, FOOT_Y - 2, W, H - FOOT_Y + 2))
+    hint(surf, s, LEFT, FOOT_Y, PAL["accent"])

@@ -1664,6 +1664,32 @@ def power_balanced():
             print("power mode:", e)
 
 
+_notified = None        # pot waarvoor de melding al geklonken heeft
+
+
+def found_notice(s, scene):
+    """Tegenstander gevonden voor een zoekopdracht: melding op de onderste regel van elk scherm,
+    Y = naar de pot. Weg zodra die pot open is (ook via YOUR GAMES) of niet meer loopt."""
+    global _notified
+    if type(scene) is GameScene:
+        ogs.seeker.seen(scene.gid)
+    f = ogs.seeker.found
+    if not f:
+        return
+    if _notified != f["game"]:
+        _notified = f["game"]
+        play_stone()
+    retro.notice(s, f"{{Y}} play {f['opp'][:12]} ({f['speed']})")
+
+
+def switch_to_found(scene):
+    """Y bij een melding: naar de gevonden pot. Een offline pot is al opgeslagen (na elke zet)."""
+    f = ogs.seeker.take()
+    if isinstance(scene, OfflineGameScene):
+        scene._leave()                     # GNU Go netjes dicht; KataGo blijft warm
+    return GameScene(f["game"])
+
+
 def main():
     power_balanced()
     pygame.init()
@@ -1695,6 +1721,7 @@ def main():
                               f"out/{name}.png")
         print("shots: out/title.png out/game.png out/newgame.png")
         return
+    ogs.seeker.start()                     # volgt zoekopdrachten, ook tijdens een botpot
     scene = TitleScene()
     clock = pygame.time.Clock()
     last_frame, fresh, last_input = None, 0, 0.0
@@ -1710,6 +1737,9 @@ def main():
             ev = pad_translate(ev) or ev
             if ev.type == pygame.KEYDOWN:
                 last_input = time.monotonic()
+            if ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE and ogs.seeker.found:
+                scene = switch_to_found(scene)     # Y bij een melding: naar de gevonden pot
+                continue
             if ev.type == pygame.KEYDOWN and ev.key == pygame.K_ESCAPE:
                 if isinstance(scene, TitleScene):
                     return
@@ -1720,6 +1750,7 @@ def main():
             scene.goto = None
             scene = nxt
         scene.draw(canvas)
+        found_notice(canvas, scene)
         # alleen schalen + flippen als het canvas veranderde (2x: dubbele buffer)
         frame = canvas.get_buffer().raw
         if frame != last_frame:

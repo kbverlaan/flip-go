@@ -351,8 +351,9 @@ def create_challenge(speed="daily", size=9, ranked=True):
     r = S.post(f"{BASE}/challenges/", json=body, headers=_auth(), timeout=15)
     r.raise_for_status()
     res = r.json()
-    _chall_store(_chall_store() + [{"id": res.get("challenge"), "game": res.get("game"),
-                                    "speed": speed, "size": size}])
+    with _chall_lock:
+        _chall_store(_chall_store() + [{"id": res.get("challenge"), "game": res.get("game"),
+                                        "speed": speed, "size": size}])
     return res
 
 
@@ -368,17 +369,37 @@ def cancel_challenge(cid):
     r = S.delete(f"{BASE}/challenges/{cid}/", headers=_auth(), timeout=15)
     if r.status_code not in (200, 204):
         r.raise_for_status()
-    _chall_store([c for c in _chall_store() if c.get("id") != cid])
+    _chall_drop(cid)
     return True
 
 
+_chall_lock = threading.RLock()     # de lijst wordt ook door de Seeker gelezen en geschreven
+
+
 def _chall_store(data=None):
-    if data is not None:
-        CHALL_FILE.write_text(json.dumps(data))
-        return data
-    if CHALL_FILE.exists():
-        return json.loads(CHALL_FILE.read_text())
-    return []
+    with _chall_lock:
+        if data is not None:
+            tmp = CHALL_FILE.with_suffix(".tmp")
+            tmp.write_text(json.dumps(data))
+            tmp.replace(CHALL_FILE)           # atomisch: een andere thread leest nooit half
+            return data
+        if CHALL_FILE.exists():
+            return json.loads(CHALL_FILE.read_text())
+        return []
+
+
+def _chall_drop(cid):
+    with _chall_lock:
+        _chall_store([c for c in _chall_store() if c.get("id") != cid])
+
+
+def _challenge_open(cid):
+    """True zolang OGS de challenge kent; alleen een 404 betekent weg (geen netwerkfout)."""
+    r = S.get(f"{BASE}/challenges/{cid}", headers=_auth(), timeout=15)
+    if r.status_code == 404:
+        return False
+    r.raise_for_status()
+    return True
 
 
 def my_challenges():
@@ -387,12 +408,120 @@ def my_challenges():
     out = []
     for c in _chall_store():
         try:
-            api(f"challenges/{c['id']}")
-            out.append(c)
+            if not _challenge_open(c["id"]):
+                _chall_drop(c["id"])        # aangenomen (pot staat in de lijst) of verlopen
+                continue
         except Exception:
-            pass     # geaccepteerd (pot staat dan in de lijst) of verlopen
-    _chall_store(out)
+            pass                            # netwerk: niet vergeten
+        out.append(c)
     return out
+
+
+class Seeker:
+    """Volgt de eigen open challenges op de achtergrond, ook tijdens een botpot.
+    Live: elke seconde challenge/keepalive op een aangemelde socket; zonder verdwijnt een
+    live-challenge binnen ~20 s (getest 27 okt). Aangenomen = de challenge is weg en de pot
+    (nummer uit create_challenge) staat op 'play': dan staat found klaar voor de melding."""
+    CHECK = {"live": 2, "daily": 30}       # seconden tussen controles
+
+    def __init__(self):
+        self.watch = {}                    # challenge-id -> regel uit challenges.json
+        self.found = None                  # {"game", "opp", "speed"} tot je de pot opent of hij afloopt
+        self._ws, self._checked, self._err, self._started = None, {}, None, False
+
+    def start(self):
+        if not self._started:
+            self._started = True
+            threading.Thread(target=self._run, daemon=True).start()
+
+    def take(self):
+        f, self.found = self.found, None
+        return f
+
+    def seen(self, gid):
+        """De pot is open (via de melding of YOUR GAMES): melding weg."""
+        if self.found and self.found["game"] == gid:
+            self.found = None
+
+    def _run(self):
+        while True:
+            try:
+                self._tick()
+                self._err = None
+            except Exception as e:
+                if str(e) != self._err:            # één regel per soort fout, niet elke seconde
+                    print("seeker:", e, flush=True)
+                    self._err = str(e)
+                self._close()
+                time.sleep(4)
+            time.sleep(1)
+
+    def _tick(self):
+        for c in _chall_store():
+            self.watch.setdefault(c.get("id"), c)
+        live = [c for c in self.watch.values() if c.get("speed") == "live" and c.get("game")]
+        if live:
+            self._keepalive(live)
+        else:
+            self._close()
+        now = time.time()
+        for cid, c in list(self.watch.items()):
+            if now - self._checked.get(cid, 0) < self.CHECK.get(c.get("speed"), 30):
+                continue
+            self._checked[cid] = now
+            if _challenge_open(cid):
+                continue
+            self.watch.pop(cid, None)
+            _chall_drop(cid)
+            self.found = self._game(c.get("game"), c.get("speed")) or self.found
+        if self.found and now - self._checked.get("found", 0) > 5:      # nog speelbaar?
+            self._checked["found"] = now
+            if not self._game(self.found["game"], self.found["speed"]):
+                self.found = None
+
+    def _game(self, gid, speed):
+        """-> found-dict als pot gid loopt, anders None (afgebroken, afgelopen, onbekend)."""
+        if not gid:
+            return None
+        r = S.get(f"{BASE}/games/{gid}", headers=_auth(), timeout=15)
+        if r.status_code == 404:
+            return None
+        r.raise_for_status()
+        g = r.json()
+        if g.get("ended") or (g.get("gamedata") or {}).get("phase") != "play":
+            return None
+        pl = g.get("players") or {}
+        opp = pl.get("white") if (pl.get("black") or {}).get("id") == me().get("id") else pl.get("black")
+        return {"game": gid, "opp": (opp or {}).get("username", "?"), "speed": speed}
+
+    def _keepalive(self, live):
+        global _jwt
+        import websocket
+        if self._ws is None:
+            if _jwt is None:
+                _jwt = api("ui/config")["user_jwt"]
+            self._ws = websocket.create_connection("wss://online-go.com/socket", timeout=5,
+                                                   header=["User-Agent: flip-go/0.1"])
+            self._ws.send(json.dumps(["authenticate", {"jwt": _jwt}, 1]))
+        for c in live:
+            self._ws.send(json.dumps(["challenge/keepalive", {"challenge_id": c["id"], "game_id": c["game"]}]))
+        self._ws.settimeout(0.05)                 # wat de server stuurt leeg lezen, niet wachten
+        try:
+            for _ in range(20):
+                self._ws.recv()
+        except Exception:
+            pass
+
+    def _close(self):
+        if self._ws is not None:
+            try:
+                self._ws.close()
+            except Exception:
+                pass
+            self._ws = None
+
+
+seeker = Seeker()
 
 
 if __name__ == "__main__":
