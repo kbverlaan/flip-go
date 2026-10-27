@@ -427,6 +427,7 @@ class Seeker:
     def __init__(self):
         self.watch = {}                    # challenge-id -> regel uit challenges.json
         self.found = None                  # {"game", "opp", "speed"} tot je de pot opent of hij afloopt
+        self.changes = 0                   # +1 als een zoekopdracht afloopt: YOUR GAMES laadt opnieuw
         self._ws, self._checked, self._err, self._started = None, {}, None, False
 
     def start(self):
@@ -474,6 +475,7 @@ class Seeker:
             self.watch.pop(cid, None)
             _chall_drop(cid)
             self.found = self._game(c.get("game"), c.get("speed")) or self.found
+            self.changes += 1
         if self.found and now - self._checked.get("found", 0) > 5:      # nog speelbaar?
             self._checked["found"] = now
             if not self._game(self.found["game"], self.found["speed"]):

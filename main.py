@@ -230,6 +230,7 @@ class GamesScene:
         self.stopping = None     # challenge-id die geannuleerd wordt
         self.me_label = None
         self.fsel = 0            # footer: 0 = NEW GAME, 1 = HISTORY
+        self._changes = ogs.seeker.changes
         threading.Thread(target=self._load, daemon=True).start()
 
     def _load(self):
@@ -309,7 +310,11 @@ class GamesScene:
         if self.games is None:
             retro.status(s, "loading" + "." * (int((time.monotonic() - self.t0) * 3) % 4))
             return
+        if ogs.seeker.changes != self._changes:     # zoekopdracht gevonden of weg: lijst opnieuw
+            self._changes = ogs.seeker.changes
+            threading.Thread(target=self._load, daemon=True).start()
         rows = self._rows()
+        self.sel = min(self.sel, len(rows))         # lijst kan korter worden ('seeking' weg)
         off = max(0, min(self.sel - 3, len(rows) - 6))          # 6 zichtbaar, scrollt
         for i, (kind, data) in enumerate(rows[off:off + 6]):
             y, sel = retro.row_y(i), i + off == self.sel
