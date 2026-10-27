@@ -295,6 +295,22 @@ TIME_CONTROLS = {
              "pause_on_weekends": False},
 }
 
+
+
+def _dur(sec):
+    """Seconden -> '3d' / '2m' / '30s' (grootste hele eenheid)."""
+    for unit, n in (("d", 86400), ("h", 3600), ("m", 60)):
+        if sec % n == 0:
+            return f"{sec // n}{unit}"
+    return f"{sec}s"
+
+
+def time_label(speed):
+    """'3d + 1d per move' uit TIME_CONTROLS (voor NEW GAME)."""
+    tc = TIME_CONTROLS[speed]
+    return f"{_dur(tc['initial_time'])} + {_dur(tc['time_increment'])} per move"
+
+
 # De OGS-bloemenladder (alfabetisch = oplopend in sterkte), ids via active-bots
 FLOWERS = [
     ("Agapanthus", 1195515),

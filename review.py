@@ -30,6 +30,8 @@ VERSION = 3       # opslagformaat reviews.jsonl (v3: per zet, beide kleuren)
 # Labels <= 7 tekens: ze passen zo in het zijpaneel.
 CLASSES = (("best", "Best", "", 0.3), ("good", "Good", "", 1.5), ("inacc", "Inacc", "?!", 3.0),
            ("mistake", "Mistake", "?", 6.0), ("blunder", "Blunder", "??", 1e9))
+BAD = ("inacc", "mistake", "blunder")     # krijgen een fouttype en een betere zet
+ERRORS = ("mistake", "blunder")           # tellen als fout (grafiek, opnieuw doorrekenen)
 
 
 # Accuracy (zoals schaaksites; hoger = beter): per eigen zet 100 * e^(-verlies / ACC_K),
@@ -159,7 +161,7 @@ HCAP_PTS = {2: "TR BL", 3: "TR BL BR", 4: "TR BL BR TL", 5: "TR BL BR TL C", 6: 
 
 def handicap_stones(size, n):
     """Vaste handicappunten (sterpunten), y=0 boven. -> [(x,y)]"""
-    lo = 2 if size <= 9 else 3
+    lo = goban.star_line(size)
     hi, mid = size - 1 - lo, size // 2
     at = {"TR": (hi, lo), "BL": (lo, hi), "BR": (hi, hi), "TL": (lo, lo), "C": (mid, mid),
           "L": (lo, mid), "R": (hi, mid), "T": (mid, lo), "B": (mid, hi)}
@@ -194,7 +196,7 @@ def compute(size, moves, evals, human=1, deep=None, handicap=0):
                 rows.append({
                     "t": t, "col": col, "lost": round(lost, 2), "cls": cls,
                     "cat": classify([r[:] for r in board], t, played, answer, max(lost, 0), prev, col)
-                    if cls in ("inacc", "mistake", "blunder") else None,
+                    if cls in BAD else None,
                     "phase": phase_of(t - handicap, board, size), "played": played, "answer": answer,
                     "reply": tuple(nxt) if nxt and nxt[0] >= 0 else None,
                     "pv": [gtp_xy(m, size) for m in src[t].get("pv") or []]})
@@ -223,7 +225,7 @@ def compute(size, moves, evals, human=1, deep=None, handicap=0):
 
 def recheck(rows, limit=20):
     """Welke beurten opnieuw doorrekenen met meer visits: alle eigen mistakes/blunders (max limit)."""
-    bad = sorted((r for r in rows if r["cls"] in ("mistake", "blunder")), key=lambda r: -r["lost"])
+    bad = sorted((r for r in rows if r["cls"] in ERRORS), key=lambda r: -r["lost"])
     return [r["t"] for r in bad[:limit]]
 
 

@@ -157,7 +157,7 @@ def analyse(size, moves, komi, rules, human, eng, progress, stop):
     work.update(base=min(0.99, work["base"] + (1 - work["base"]) * work["done"] / work["total"]),
                 done=0, total=max(1, 2 * DEEP * len(todo)))
     evd = {}
-    eng.turns(gm, size, komi, rules, {u for t in todo for u in (t, t + 1)}, 30, evd,
+    eng.turns(gm, size, komi, rules, {u for t in todo for u in (t, t + 1)}, judge.DEEP_VISITS, evd,
               lambda: step(DEEP), stop)
     return review.compute(size, moves, ev, human=human, deep=evd)
 

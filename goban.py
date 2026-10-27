@@ -13,6 +13,11 @@ def to_gtp(x, y, size):
     return "pass" if x < 0 else f"{COLS[x]}{size - y}"
 
 
+def star_line(size):
+    """Lijn (vanaf 0) van de hoek-sterpunten: 3-3 op kleine borden, anders 4-4."""
+    return 2 if size < 13 else 3
+
+
 def color_at(t, handicap=0):
     """Kleur van zet t. Handicap (OGS-vorm): de eerste N zetten zijn de zwarte stenen, dan begint wit."""
     if handicap:

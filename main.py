@@ -36,7 +36,7 @@ _BG = {}
 def board_bg(n):
     """Statisch bord (hout, raster, hoshi) 1x gerenderd per bordmaat (gedeeld)."""
     if n not in _BG:
-        c = min(23, 192 // max(1, n - 1))
+        c = board_geom(n)[0]
         span = c * (n - 1)
         o = (212 - span) // 2
         bg = pygame.Surface((212, 212))
@@ -45,7 +45,7 @@ def board_bg(n):
         for i in range(n):
             pygame.draw.line(bg, PAL["line"], (o, o + i * c), (o + span, o + i * c))
             pygame.draw.line(bg, PAL["line"], (o + i * c, o), (o + i * c, o + span))
-        e = 2 if n < 13 else 3
+        e = goban.star_line(n)
         hoshi = [(a, b) for a in (e, n - 1 - e) for b in (e, n - 1 - e)] + [(n // 2, n // 2)]
         if n == 19:
             hoshi += [(3, 9), (15, 9), (9, 3), (9, 15)]
@@ -381,8 +381,8 @@ def set_size(n):
 
 class NewGameScene:
     """Nieuwe pot: daily, live (open challenge) of een bot van de bloemenladder."""
-    OPTIONS = (("daily", "3d + 1d per move"),
-               ("live", "2m + 30s per move"),
+    OPTIONS = (("daily", ogs.time_label("daily")),
+               ("live", ogs.time_label("live")),
                ("bots", "the flower ladder"),
                ("offline", "local bot, no wifi"))
 
@@ -705,6 +705,7 @@ class GameScene:
     """Echte OGS-pot (of mock als gid None). A = zet (met bevestiging),
     S = menu: Pass / Resign / Info / Quit."""
     MENU = ("PASS", "RESIGN", "INFO", "QUIT")
+    can_review = False             # OfflineGameScene: alleen met KataGo
 
     def __init__(self, gid, back=None):
         self.gid = gid
@@ -926,30 +927,14 @@ class GameScene:
         retro.text_r(s, self.times[color - 1], 312, y + 20,
                      PAL["text"] if to_move and self.phase == "play" else PAL["text_dim"])
 
-    def _board_bg(self):
-        return board_bg(self.size)
-
     def draw(self, s):
         if self._snap:               # atomaire overname van een verse load
             self.__dict__.update(self._snap)
             self._snap = None
         s.fill(PAL["screen"])
-        s.blit(self._board_bg(), (4, 14))
         n = self.size
-        c = min(23, 192 // max(1, n - 1))
-        span = c * (n - 1)
-        ox = 4 + (212 - span) // 2
-        oy = 14 + (212 - span) // 2
-        r = max(4, c * 2 // 5 + 1)
-        for y in range(n):
-            for x in range(n):
-                if self.board[y][x]:
-                    retro.stone(s, ox + x * c, oy + y * c, r,
-                                goban.letter(self.board[y][x]))
-        if self.last:
-            lx, ly = self.last
-            col = PAL["white_sh"] if self.board[ly][lx] == 1 else PAL["black_hi"]
-            pygame.draw.rect(s, col, (ox + lx * c - 2, oy + ly * c - 2, 5, 5))
+        c, ox, oy, r = board_geom(n)
+        _draw_board(s, n, self.board, [("last", self.last, None)])
         if self.menu is None and not self.info:
             px, py = ox + self.cx * c, oy + self.cy * c
             can_play = (self.my_turn and self.phase == "play" and not self.busy
@@ -995,7 +980,7 @@ class GameScene:
             retro.text_c(s, "YOU WON" if won else "YOU LOST", 270, 112)
             retro.text_c(s, ogs.format_outcome(self.winner_id == self.black_id,
                                                self.outcome), 270, 132)
-            can_rev = self.speed == "offline" and hasattr(getattr(self, "eng", None), "evals")
+            can_rev = self.can_review
             retro.text_c(s, "A review" if can_rev else "A back" if self.speed == "offline" else "A games",
                          270, 156, PAL["text_dim"])
         elif self.phase == "stone removal" and not self.busy:
@@ -1151,13 +1136,18 @@ class OfflineGameScene(GameScene):
                 self.eng.play(goban.letter(goban.color_at(i, self.handicap)), x, y)
             if self._turn() != self.human:
                 self._bot_move()
-            elif hasattr(self.eng, "eval_async"):
+            elif self.can_review:
                 self.eng.eval_async()          # stand voor de mens alvast beoordelen (review)
             self._load()
         except Exception as e:
             print("offline: engine start failed:", e)
             self._snap = {"msg": "Bot failed"}
         self.busy = False
+
+    @property
+    def can_review(self):
+        """Alleen KataGo met scheidsrechter beoordeelt stellingen (GNU Go niet)."""
+        return hasattr(self.eng, "evals")
 
     def _turn(self):
         return goban.color_at(len(self.moves), self.handicap)
@@ -1182,7 +1172,7 @@ class OfflineGameScene(GameScene):
         """Na de pot: ontbrekende stellingen aanvullen, alle eigen mistakes/blunders nauwkeuriger
         doorrekenen (30 visits) en de review in conf/reviews.jsonl bewaren."""
         e = self.eng
-        if not hasattr(e, "evals"):
+        if not self.can_review:
             self.review = {"error": "review: KataGo bots only"}
             return
         try:
@@ -1190,7 +1180,7 @@ class OfflineGameScene(GameScene):
             # voortgang in werkeenheden: stelling op 8 visits = 1, op 30 visits = DEEP.
             # Het aantal fouten om opnieuw door te rekenen volgt al uit de beoordelingen
             # van tijdens de pot, dus het totaal staat vooraf (bijna) vast.
-            DEEP = 3
+            DEEP = analyse.DEEP
             H = self.handicap
             r0 = review.compute(self.size, moves, dict(e.evals), human=self.human, handicap=H)
             n_deep = len(review.recheck(r0["rows"])) if r0 else 0
@@ -1293,7 +1283,7 @@ class OfflineGameScene(GameScene):
 
     def handle(self, ev):
         if ev.type == pygame.KEYDOWN and self.phase == "finished" and ev.key in A_KEYS \
-                and hasattr(self.eng, "evals"):
+                and self.can_review:
             return GameReviewScene(self)
         return super().handle(ev)
 
@@ -1397,7 +1387,7 @@ class GameReviewScene:
             pygame.draw.lines(s, PAL["text"], False, pts, 1)
             for row in r["rows"]:
                 i = row["t"] - r.get("handicap", 0)
-                if row["col"] == human and row["cls"] in ("mistake", "blunder") and 0 <= i < len(pts):
+                if row["col"] == human and row["cls"] in review.ERRORS and 0 <= i < len(pts):
                     px, py = pts[i]
                     pygame.draw.rect(s, PAL[CLS_COL[row["cls"]]], (px - 2, py - 2, 5, 5))
         # zetklassen jij | bot
@@ -1461,7 +1451,7 @@ class WalkScene:
     def _bad(self):
         h = self.r.get("human", 1)
         return sorted(t for t, row in self.rows.items()
-                      if row["col"] == h and row["cls"] in ("inacc", "mistake", "blunder"))
+                      if row["col"] == h and row["cls"] in review.BAD)
 
     def handle(self, ev):
         if ev.type != pygame.KEYDOWN:
@@ -1501,7 +1491,7 @@ class WalkScene:
             marks += [("ring", row["answer"], None)]
         else:
             marks += [("played", played, (col_me, CLS_COL.get(cls, "text_dim")))]
-            if row and row["answer"] and row["answer"] != played and cls not in ("best", "good"):
+            if row and row["answer"] and row["answer"] != played and cls in review.BAD:
                 marks += [("ring", row["answer"], None)]
         s.fill(PAL["screen"])
         _draw_board(s, n, self.boards[t], marks)
@@ -1522,7 +1512,7 @@ class WalkScene:
             retro.text(s, (lab + " " + sym).strip(), 228, 72, PAL[CLS_COL[cls]])
             retro.text(s, f"-{max(0, row['lost']):.1f} pts" if cls != "best" else "top move", 228, 86,
                        PAL["text_dim"])
-            if row["answer"] and cls not in ("best", "good"):
+            if row["answer"] and cls in review.BAD:
                 retro.text(s, f"best {_coord(row['answer'], n)}", 228, 100, PAL["green"])
         elif mine:
             retro.dialog_box(s, (224, 66, 92, 50))

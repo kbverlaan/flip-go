@@ -21,6 +21,7 @@ JUDGE_CFG = "judge_analysis.cfg"
 VISITS = 8           # genoeg voor pass/opgave/grove blunders; ~0,7 s op 13x13 (Flip)
 TEMPERATURE = 0.8      # trekken uit de menselijke policy (lager = vaker de topzet)
 TRIES = 4              # max. aantal menselijke kandidaten dat we laten keuren
+DEEP_VISITS = 30       # eigen fouten na de pot nauwkeuriger doorrekenen (review)
 
 
 def available():
@@ -132,7 +133,7 @@ class JudgedEngine:
                     step()
         return ev
 
-    def deep(self, t, visits=30, ev=None, moves=None, step=None):
+    def deep(self, t, visits=DEEP_VISITS, ev=None, moves=None, step=None):
         """Nauwkeuriger (meer visits) voor een review-moment: vóór en na zet t."""
         ev = self.evals if ev is None else ev
         moves = list(self.moves) if moves is None else moves
