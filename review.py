@@ -14,7 +14,6 @@ import time
 import goban
 
 LET = "ABCDEFGHJKLMNOPQRST"
-BLUNDER = 6.0
 CATS = {   # label + twee regels uitleg, elk <= 10 tekens (past in het zijpaneel bij 8px)
     "selfatari": ("Self-atari", "Own stones", "in atari"),
     "atari": ("Atari", "Capture or", "save group"),

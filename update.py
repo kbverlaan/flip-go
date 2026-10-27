@@ -7,7 +7,6 @@ Assets (geluid/font) reizen niet mee via OTA — die wijzigen zelden en
 gaan via de SD-kaart.
 """
 import ast
-import sys
 from pathlib import Path
 
 REPO = "kbverlaan/flip-go"

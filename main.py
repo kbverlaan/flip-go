@@ -245,8 +245,6 @@ class GamesScene:
             self.games = []
             _net["down"] = True
 
-    FOOTER = ("NEW GAME", "HISTORY")
-
     def _rows(self):
         """-> lijst ('offline'|'game'|'seek', data); footer staat er los onder"""
         if not hasattr(self, "_offline"):
@@ -391,7 +389,6 @@ class NewGameScene:
             return self.back()
         if self.busy:
             return self
-        global new_size
         if ev.key == pygame.K_DOWN:
             self.sel = min(len(self.OPTIONS) - 1, self.sel + 1)
         elif ev.key == pygame.K_UP:
@@ -1045,7 +1042,6 @@ class OfflineScene:
         self.sel = 0
 
     def handle(self, ev):
-        global new_size
         if ev.type != pygame.KEYDOWN:
             return self
         if ev.key == pygame.K_s:
