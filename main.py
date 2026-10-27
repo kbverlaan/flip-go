@@ -1301,7 +1301,8 @@ def toggle_view():
     global view_pct
     view_pct = not view_pct
     write_pref("view", "pct" if view_pct else "pts")
-CLS_COL = {"best": "green", "good": "text_dim", "inacc": "yellow", "mistake": "orange", "blunder": "accent"}
+# zetklassen: groen -> olijf -> geel -> oranje -> rood (tint loopt af, best -> blunder)
+CLS_COL = {"best": "green", "good": "olive", "inacc": "yellow", "mistake": "orange", "blunder": "accent"}
 
 
 def _coord(pt, n):
@@ -1396,7 +1397,7 @@ class GameReviewScene:
         retro.text_r(s, "you", 154, 100, PAL["text_dim"])
         for i, (k, lab, sym, _) in enumerate(review.CLASSES):
             y = 116 + i * 14
-            col = PAL["text"] if k == "good" else PAL[CLS_COL[k]]
+            col = PAL[CLS_COL[k]]
             retro.text(s, (lab + " " + sym).strip(), 14, y, col)
             for side, xr, col in (("me", 154, PAL["text"]),):
                 v = r[side].get(k, 0)
