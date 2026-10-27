@@ -27,8 +27,9 @@ CATS = {   # label + twee regels uitleg, elk <= 10 tekens (past in het zijpaneel
 }
 VERSION = 3       # opslagformaat reviews.jsonl (v3: per zet, beide kleuren)
 
-# Zetklassen naar chess.com/ogs-review (verlies in punten): (sleutel, label, symbool, max-verlies)
-CLASSES = (("best", "Best", "", 0.3), ("good", "Good", "", 1.5), ("inacc", "Inaccuracy", "?!", 3.0),
+# Zetklassen naar chess.com/ogs-review (verlies in punten): (sleutel, label, symbool, max-verlies).
+# Labels <= 7 tekens: ze passen zo in het zijpaneel.
+CLASSES = (("best", "Best", "", 0.3), ("good", "Good", "", 1.5), ("inacc", "Inacc", "?!", 3.0),
            ("mistake", "Mistake", "?", 6.0), ("blunder", "Blunder", "??", 1e9))
 
 

@@ -250,7 +250,7 @@ class GamesScene:
         """-> lijst ('offline'|'game'|'seek', data); footer staat er los onder"""
         if not hasattr(self, "_offline"):
             sv = load_offline()
-            bot = sv and next((b for b in gtp.BOTS if b[0] == sv.get("bot")), None)
+            bot = saved_bot(sv)
             self._offline = (sv, bot) if bot else None
         rows = [("offline", self._offline)] if self._offline else []
         rows += [("game", g) for g in (self.games or [])]
@@ -282,9 +282,7 @@ class GamesScene:
                 return OfflineScene() if self.error else NewGameScene()
             kind, data = rows[self.sel]
             if kind == "offline":
-                sv, bot = data
-                return OfflineGameScene(bot, sv["size"], sv["moves"], sv.get("handicap", 0),
-                                        sv.get("human", 1))
+                return resume_offline(data[0]) or self
             if kind == "game":
                 return GameScene(data["id"])
             if kind == "seek":
@@ -350,22 +348,34 @@ class GamesScene:
         draw_nowifi(s)
 
 
+CONF = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conf")
+
+
+def read_pref(name, default, cast=str):
+    """Voorkeur uit conf/<name>.txt (bordmaat, handicap, weergave), anders default."""
+    try:
+        return cast(open(os.path.join(CONF, name + ".txt")).read().strip())
+    except (OSError, ValueError):
+        return default
+
+
+def write_pref(name, value):
+    try:
+        os.makedirs(CONF, exist_ok=True)
+        with open(os.path.join(CONF, name + ".txt"), "w") as f:
+            f.write(str(value))
+    except OSError:
+        pass
+
+
 BOARD_SIZES = (9, 13)
-_SIZE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conf", "size.txt")
-try:              # laatst gekozen bordmaat onthouden: KataGo laadt dan meteen op die maat
-    new_size = int(open(_SIZE_FILE).read())
-except (OSError, ValueError):
-    new_size = 9
+new_size = read_pref("size", 9, int)     # laatst gekozen maat: KataGo laadt meteen op die maat
 
 
 def set_size(n):
     global new_size
     new_size = n
-    try:
-        os.makedirs(os.path.dirname(_SIZE_FILE), exist_ok=True)
-        open(_SIZE_FILE, "w").write(str(n))
-    except OSError:
-        pass
+    write_pref("size", n)
 
 
 class NewGameScene:
@@ -685,7 +695,7 @@ class HistoryScene:
                 retro.text_r(s, r.get("result", "")[:9], 304, y + 8, PAL["text_dim"])
         retro.hint(s, "{A} review  {START} stats  {X} " + ("pts" if view_pct else "%"), 4, 228, PAL["text_dim"])
         if self.offline:
-            retro.text_r(s, "no wifi", 316, 228, PAL["accent"])
+            draw_nowifi(s)
         else:
             retro.text_r(s, "* offline", 316, 228, PAL["text_dim"])
 
@@ -1003,6 +1013,17 @@ class GameScene:
 SAVE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conf", "offline.json")
 
 
+def saved_bot(sv):
+    """Bot van een opgeslagen pot, of None (geen pot, of die bot staat niet meer in de ladder)."""
+    return sv and next((b for b in gtp.BOTS if b[0] == sv.get("bot")), None)
+
+
+def resume_offline(sv):
+    bot = saved_bot(sv)
+    return bot and OfflineGameScene(bot, sv["size"], sv["moves"], sv.get("handicap", 0),
+                                    sv.get("human", 1))
+
+
 def load_offline():
     try:
         with open(SAVE) as f:
@@ -1012,11 +1033,7 @@ def load_offline():
 
 
 HANDICAPS = {9: (0, 2, 3, 4, 5), 13: (0, 2, 3, 4, 5, 6, 7, 8, 9)}
-_HCAP_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conf", "handicap.txt")
-try:
-    new_handicap = int(open(_HCAP_FILE).read())
-except (OSError, ValueError):
-    new_handicap = 0
+new_handicap = read_pref("handicap", 0, int)
 
 
 def handicap_for(size):
@@ -1026,11 +1043,7 @@ def handicap_for(size):
 def set_handicap(n):
     global new_handicap
     new_handicap = n
-    try:
-        with open(_HCAP_FILE, "w") as f:
-            f.write(str(n))
-    except OSError:
-        pass
+    write_pref("handicap", n)
 
 
 class OfflineScene:
@@ -1059,16 +1072,12 @@ class OfflineScene:
             set_size(BOARD_SIZES[i % len(BOARD_SIZES)])
             gtp.preload(new_size)          # warme bot alvast naar deze maat
         elif ev.key == X_KEY:              # handicap: even, 2, 3, ... (max 5 op 9x9, 9 op 13x13)
-            opts = HANDICAPS[new_size]
+            opts = HANDICAPS.get(new_size, (0,))
             set_handicap(opts[(opts.index(handicap_for(new_size)) + 1) % len(opts)])
         elif ev.key in A_KEYS and self.rows:
             kind, bot = self.rows[self.sel]
             if kind == "continue":
-                sv = self.saved
-                bot = next((b for b in gtp.BOTS if b[0] == sv["bot"]), None)
-                if bot:
-                    return OfflineGameScene(bot, sv["size"], sv["moves"], sv.get("handicap", 0),
-                                        sv.get("human", 1))
+                return resume_offline(self.saved) or self
             else:
                 return OfflineGameScene(bot, new_size, handicap=handicap_for(new_size))
         return self
@@ -1077,8 +1086,9 @@ class OfflineScene:
         s.fill(PAL["screen"])
         retro.text_c(s, "OFFLINE", W // 2, 14, PAL["box"])
         hc = handicap_for(new_size)
-        retro.hint(s, f"{{l}} {new_size}x{new_size} {{r}}  " + (f"{hc} stones - komi 0.5" if hc else
-                   "even - komi 6.5"), W // 2, 34, PAL["accent"] if hc else PAL["text_dim"], "c")
+        komi = f"komi {OfflineGameScene.komi_for(hc):g}"
+        retro.hint(s, f"{{l}} {new_size}x{new_size} {{r}}  " + (f"{hc} stones - {komi}" if hc else
+                   f"even - {komi}"), W // 2, 34, PAL["accent"] if hc else PAL["text_dim"], "c")
         if not self.rows:
             retro.text_c(s, "no engine installed", W // 2, 100, PAL["text_dim"])
         off = max(0, min(self.sel - 3, len(self.rows) - 7))      # 7 zichtbaar, scrollt
@@ -1106,7 +1116,9 @@ class OfflineScene:
 class OfflineGameScene(GameScene):
     """Pot tegen een lokale engine; stand in conf/offline.json. Jouw kleur wordt bij een
     nieuwe pot geloot; met handicap ben je zwart (de stenen zijn voor jou)."""
-    KOMI = 6.5
+    @staticmethod
+    def komi_for(handicap):
+        return 0.5 if handicap else 6.5     # altijd .5: judge.score rondt af op halve punten
 
     def __init__(self, bot, size, moves=None, handicap=0, human=None):
         super().__init__(None)
@@ -1121,7 +1133,7 @@ class OfflineGameScene(GameScene):
         self.human = 1 if handicap else human or random.choice((1, 2))
         self.names = ("you", bot[0][:8]) if self.human == 1 else (bot[0][:8], "you")
         self.me_id, self.black_id = self.human, 1
-        self.komi = 0.5 if handicap else self.KOMI
+        self.komi = self.komi_for(handicap)
         self.rules, self.speed = "japanese", "offline"
         self.result = None             # (winner_kleur, 'x points'|'Resignation')
         self.review = None
@@ -1154,7 +1166,7 @@ class OfflineGameScene(GameScene):
 
     def _finish(self, winner=None, how=None):
         if winner is None:             # twee keer gepast: engine telt
-            sc = self.eng.score() or "B+0"
+            sc = self.eng.score() or ("B" if self.human == 1 else "W") + "+0"
             winner = 1 if sc[0] == "B" else 2
             how = f"{sc[2:]} points"
         self.result = (winner, how)
@@ -1292,21 +1304,13 @@ class OfflineGameScene(GameScene):
 REVIEWS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conf", "reviews.jsonl")
 TINT_GOOD, TINT_BAD = (214, 232, 204), (240, 214, 206)     # vlak onder de scorelijn
 X_KEY = pygame.K_r                 # knop X: overal wisselen tussen punten en procenten
-_VIEW_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "conf", "view.txt")
-try:
-    view_pct = open(_VIEW_FILE).read().strip() == "pct"
-except OSError:
-    view_pct = False
+view_pct = read_pref("view", "pts") == "pct"
 
 
 def toggle_view():
     global view_pct
     view_pct = not view_pct
-    try:
-        with open(_VIEW_FILE, "w") as f:
-            f.write("pct" if view_pct else "pts")
-    except OSError:
-        pass
+    write_pref("view", "pct" if view_pct else "pts")
 CLS_COL = {"best": "green", "good": "text_dim", "inacc": "yellow", "mistake": "orange", "blunder": "accent"}
 
 
@@ -1403,7 +1407,7 @@ class GameReviewScene:
         for i, (k, lab, sym, _) in enumerate(review.CLASSES):
             y = 116 + i * 14
             col = PAL["text"] if k == "good" else PAL[CLS_COL[k]]
-            retro.text(s, (("Inacc" if k == "inacc" else lab) + " " + sym).strip(), 14, y, col)
+            retro.text(s, (lab + " " + sym).strip(), 14, y, col)
             for side, xr, col in (("me", 154, PAL["text"]),):
                 v = r[side].get(k, 0)
                 retro.text_r(s, f"{100 * v / max(1, sum(r[side].values())):.0f}%" if view_pct else str(v),
@@ -1514,9 +1518,8 @@ class WalkScene:
             retro.text(s, f"{who} +{abs(lead):.1f}", 228, 48, col)
         if row:
             retro.dialog_box(s, (224, 66, 92, 50))
-            lab = next(l for k, l, _, _ in review.CLASSES if k == cls)
-            sym = next(sy for k, _, sy, _ in review.CLASSES if k == cls)
-            retro.text(s, (lab[:7] + " " + sym).strip(), 228, 72, PAL[CLS_COL[cls]])
+            lab, sym = next((l, sy) for k, l, sy, _ in review.CLASSES if k == cls)
+            retro.text(s, (lab + " " + sym).strip(), 228, 72, PAL[CLS_COL[cls]])
             retro.text(s, f"-{max(0, row['lost']):.1f} pts" if cls != "best" else "top move", 228, 86,
                        PAL["text_dim"])
             if row["answer"] and cls not in ("best", "good"):
@@ -1647,7 +1650,7 @@ class StatsScene:
                 txt = f"{100 * sum(r['me'].get(k, 0) for r in h) / max(1, tot):.0f}%"
             else:
                 txt = f"{mean([r['me'].get(k, 0) for r in h]):.1f}"
-            retro.text(s, (lab[:7 if k != "inacc" else 5] + " " + sym).strip(), 168, 116 + i * 14, PAL[CLS_COL[k]])
+            retro.text(s, (lab + " " + sym).strip(), 168, 116 + i * 14, PAL[CLS_COL[k]])
             retro.text_r(s, txt, 306, 116 + i * 14)
         # 4. meest gemaakte typen
         retro.dialog_box(s, (8, 164, 304, 54))
