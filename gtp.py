@@ -15,16 +15,14 @@ from paths import CONF, ENG, ENGINE_LOG
 # Offline tegenstanders: (label, kind, arg). gnugo-arg = level, katago-arg = human-profiel.
 # Bergnamen = MiniGo-bergenladder (humanlike-net speelt als een mens van die rank).
 # Laagste geldige profiel is 20k: een onbekend profiel (preaz_25k) laat KataGo crashen.
-# katago-arg = (profiel, max_loss): de scheidsrechter keurt zetten af die meer dan
-# max_loss punten weggeven (None = alleen pass/opgave bewaken).
-# Treden van 5 kyu, zonder filter (27 okt 2026). Bot tegen bot gemeten (900 potten 13x13):
-# elke trede wint ruim van de vorige; het filter tilde een bot ver boven zijn profiel uit.
+# Treden van 5 kyu (27 okt 2026). Bot tegen bot gemeten (900 potten 13x13): elke trede wint
+# ruim van de vorige.
 BOTS = (
-    ("Vaalserberg", "katago", ("preaz_25k", None)),   # vereist gepatchte KataGo (21k-30k)
-    ("Zugspitze", "katago", ("preaz_20k", None)),
-    ("Mont Blanc", "katago", ("preaz_15k", None)),
-    ("Kilimanjaro", "katago", ("preaz_10k", None)),
-    ("K2", "katago", ("preaz_5k", None)),
+    ("Vaalserberg", "katago", "preaz_25k"),   # vereist gepatchte KataGo (21k-30k)
+    ("Zugspitze", "katago", "preaz_20k"),
+    ("Mont Blanc", "katago", "preaz_15k"),
+    ("Kilimanjaro", "katago", "preaz_10k"),
+    ("K2", "katago", "preaz_5k"),
     ("GNU Go 5", "gnugo", 5),
     ("GNU Go 10", "gnugo", 10),
 )
@@ -32,11 +30,8 @@ HUMAN_NET = "b18c384nbt-humanv0.bin.gz"
 
 
 def level(bot):
-    """Niveau voor in de lijst: profiel ('10k'); '+' als de scheidsrechter blunders tegenhoudt."""
-    if bot[1] == "gnugo":
-        return "GNU"
-    prof, max_loss = bot[2]
-    return prof.split("_")[1] + ("+" if max_loss is not None else "")
+    """Niveau voor in de lijst: het profiel ('10k')."""
+    return "GNU" if bot[1] == "gnugo" else bot[2].split("_")[1]
 
 
 def _weak_ok():
@@ -45,7 +40,7 @@ def _weak_ok():
 
 
 def _needs_patch(b):
-    return b[1] == "katago" and int(_profile(b[2]).split("_")[1].rstrip("k")) > 20
+    return b[1] == "katago" and int(b[2].split("_")[1].rstrip("k")) > 20
 
 
 def available():
@@ -243,10 +238,6 @@ _warm_lock = threading.Lock()
 _judge = None           # warme b6-scheidsrechter (zie judge.py)
 
 
-def _profile(arg):
-    return arg[0] if isinstance(arg, (tuple, list)) else arg
-
-
 def get_engine(kind, arg, size, komi):
     """GNU Go start in een flits: altijd vers. KataGo: hergebruik de warme."""
     global _warm
@@ -255,7 +246,7 @@ def get_engine(kind, arg, size, komi):
         e.new_game(size, komi)
         return e
     global _judge
-    prof = _profile(arg)
+    prof = arg
     with _warm_lock:
         if _warm is None or _warm.p.poll() is not None:
             _warm = _start_human(prof, size)
@@ -276,7 +267,7 @@ def get_engine(kind, arg, size, komi):
             return _warm
         if _judge is None or _judge.p.poll() is not None:
             _judge = judge.Judge()
-        e = judge.JudgedEngine(_warm, _judge, arg[1] if isinstance(arg, (tuple, list)) else None)
+        e = judge.JudgedEngine(_warm, _judge)
         e.size, e.komi = size, komi
         return e
 
@@ -309,7 +300,7 @@ def preload(size=9):
                 return
             try:
                 if _warm is None or _warm.p.poll() is not None:
-                    prof = _profile(next(b for b in available() if b[1] == "katago")[2])
+                    prof = next(b for b in available() if b[1] == "katago")[2]
                     _warm = _start_human(prof, size, abortable=True)   # blokkeert tot geladen
                 elif _warm.size != size and size in (9, 13):    # 19x19 niet getuned: niet vooraf
                     _warm.new_game(size, 6.5)

@@ -2,9 +2,8 @@
 
 Het humanlike-net (1 netwerk-evaluatie, `kata-raw-nn 0`) levert de menselijke
 kansverdeling; daaruit trekken we een zet. Een klein net (b6) als KataGo-analyse-engine
-beslist over passen en opgeven en kan zetten afkeuren die meer dan `max_loss` punten
-weggeven (nu bij geen berg in gebruik, zie gtp.BOTS). Zo blijft de zet menselijk en
-speelt de bot een pot netjes uit.
+beslist over passen en opgeven. Zo blijft de zet menselijk en speelt de bot een pot
+netjes uit.
 """
 import json
 import os
@@ -20,7 +19,6 @@ JUDGE_NET = "b6c96.bin.gz"
 JUDGE_CFG = "judge_analysis.cfg"
 VISITS = 8           # genoeg voor pass/opgave/grove blunders; ~0,7 s op 13x13 (Flip)
 TEMPERATURE = 0.8      # trekken uit de menselijke policy (lager = vaker de topzet)
-TRIES = 4              # max. aantal menselijke kandidaten dat we laten keuren
 DEEP_VISITS = 30       # eigen fouten na de pot nauwkeuriger doorrekenen (review)
 
 
@@ -77,8 +75,8 @@ class JudgedEngine:
     """Zelfde interface als gtp.Engine (play/genmove/score/new_game/close)."""
     kind = "katago"
 
-    def __init__(self, human, judge, max_loss):
-        self.human, self.judge, self.max_loss = human, judge, max_loss
+    def __init__(self, human, judge):
+        self.human, self.judge = human, judge
         self.p = human.p           # voor warm-checks in gtp.py
         self.arg = human.arg
         self.size, self.komi, self.moves, self.behind = 9, 6.5, [], 0
@@ -177,9 +175,7 @@ class JudgedEngine:
         root = self.judge.analyze(self.moves, self.size, self.komi)
         self._remember(self.evals, len(self.moves), root)
         t_root = time.monotonic() - t0
-        t_pol, checks = 0.0, 0
-        known = {m["move"].upper(): self._lead({"rootInfo": m}, color)
-                 for m in root.get("moveInfos", [])}
+        t_pol = 0.0
         lead = self._lead(root, color)
         best = (root.get("moveInfos") or [{"move": "pass"}])[0]["move"].lower()
         area = self.size * self.size
@@ -193,32 +189,9 @@ class JudgedEngine:
             th.join()
             probs = pol["p"]
             t_pol = time.monotonic() - t0
-            mv, best_loss = None, None
-            for _ in range(TRIES):
-                if not probs:
-                    break
-                c = self._draw(probs)
-                if self.max_loss is None:
-                    mv = c
-                    break
-                g = self._gtp(*c)
-                if g.upper() in known:             # al door de scheidsrechter bekeken
-                    loss = lead - known[g.upper()]
-                else:
-                    checks += 1
-                    r = self.judge.analyze(self.moves, self.size, self.komi, {
-                        "allowMoves": [{"player": color, "moves": [g], "untilDepth": 1}]})
-                    loss = lead - self._lead(r, color)
-                if loss <= self.max_loss:
-                    mv = c
-                    break
-                if best_loss is None or loss < best_loss[0]:
-                    best_loss = (loss, c)
-                probs.pop(c)
-            if mv is None:
-                mv = best_loss[1] if best_loss else "pass"
+            mv = self._draw(probs) if probs else "pass"
         print(f"judge: zet {len(self.moves)+1} root {t_root:.2f}s policy {t_pol:.2f}s "
-              f"checks {checks} totaal {time.monotonic()-t0:.2f}s", flush=True)
+              f"totaal {time.monotonic()-t0:.2f}s", flush=True)
         th.join()                              # policy-thread nooit laten hangen
         if mv == "pass":
             self.human.cmd(f"play {color} pass")
