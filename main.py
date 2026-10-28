@@ -249,10 +249,12 @@ class GamesScene:
     def _rows(self):
         """-> lijst ('offline'|'game'|'seek', data); footer staat er los onder"""
         if not hasattr(self, "_offline"):
-            sv = load_offline()
+            sv = load_save(SAVE)
             bot = saved_bot(sv)
             self._offline = (sv, bot) if bot else None
+            self._local = load_save(LOCAL_SAVE) if local_engine_bot() else None
         rows = [("offline", self._offline)] if self._offline else []
+        rows += [("local", self._local)] if self._local else []
         rows += [("game", g) for g in (self.games or [])]
         rows += [("seek", c) for c in self.seeking]
         return rows
@@ -283,6 +285,8 @@ class GamesScene:
             kind, data = rows[self.sel]
             if kind == "offline":
                 return resume_offline(data[0]) or self
+            if kind == "local":
+                return resume_local(data)
             if kind == "game":
                 return GameScene(data["id"])
             if kind == "seek":
@@ -322,6 +326,8 @@ class GamesScene:
             lab, val, lcol, vcol, size = None, None, None, None, None
             if kind == "offline":
                 lab, val, size = f"vs {data[1][0][:13]}", "offline", data[0].get("size")
+            elif kind == "local":
+                lab, val, size = f"vs {LocalGameScene.opp_name}", "local", data.get("size")
             elif kind == "game":
                 lab, size = f"vs {data['opp'][:13]}", data.get("size")
                 if data["my_turn"] and data.get("left"):
@@ -376,12 +382,13 @@ def set_size(n):
 
 
 class NewGameScene:
-    """Nieuwe pot: daily, live (open challenge), een bot van de bloemenladder of een lokale bot.
-    Zonder verbinding staan de online-opties er niet (niet grijs): A blijft gewoon werken."""
+    """Nieuwe pot: daily, live (open challenge), een bot van de bloemenladder, een lokale bot, of
+    met z'n tweeën op dit apparaat. Zonder verbinding staan de online-opties er niet (niet grijs):
+    A blijft gewoon werken."""
     ONLINE = (("daily", ogs.time_label("daily")),
               ("live", ogs.time_label("live")),
-              ("bots", "the flower ladder"))
-    LOCAL = (("offline", "local bot, no wifi"),)
+              ("bots", "ogs ladder"))
+    LOCAL = (("offline", "local bot"), ("local", "2 players"))
 
     @property
     def options(self):
@@ -414,6 +421,8 @@ class NewGameScene:
                 return BotScene()
             if self.options[self.sel][0] == "offline":
                 return OfflineScene()
+            if self.options[self.sel][0] == "local":
+                return LocalScene()
             self.busy = True
             self.msg = "posting..."
             threading.Thread(target=self._create, daemon=True).start()
@@ -433,7 +442,7 @@ class NewGameScene:
         retro.subtitle(s, f"{{l}} {new_size}x{new_size} {{r}}" + ("" if _net["down"] else f" ranked - {goban.RULES}"))
         self.sel = min(self.sel, len(self.options) - 1)
         for i, (name, desc) in enumerate(self.options):
-            retro.row(s, retro.row_y(i, two=True), name.upper(), sub=desc, selected=i == self.sel)
+            retro.row(s, retro.row_y(i), name.upper(), desc, selected=i == self.sel)
         if self.msg:
             retro.status(s, self.msg, PAL["accent"] if self.msg == "failed" else None)
         else:
@@ -993,6 +1002,7 @@ class GameScene:
 
 
 SAVE = os.path.join(paths.CONF, "offline.json")
+LOCAL_SAVE = os.path.join(paths.CONF, "local.json")       # pot met z'n tweeën op dit apparaat
 
 
 def opp_rank(name):
@@ -1012,9 +1022,50 @@ def resume_offline(sv):
                                     sv.get("human", 1))
 
 
-def load_offline():
+def resume_local(sv):
+    return LocalGameScene(sv["size"], sv["moves"], sv.get("handicap", 0), sv.get("human", 1))
+
+
+def setup_keys(ev):
+    """Bordmaat (links/rechts) en handicap (X) op OFFLINE en LOCAL. -> True als de toets op ging."""
+    if ev.key in (pygame.K_LEFT, pygame.K_RIGHT):
+        i = BOARD_SIZES.index(new_size) + (1 if ev.key == pygame.K_RIGHT else -1)
+        set_size(BOARD_SIZES[i % len(BOARD_SIZES)])
+        gtp.preload(new_size)          # warme KataGo alvast naar deze maat
+    elif ev.key == X_KEY:              # handicap: even, 2, 3, ... (max 5 op 9x9, 9 op 13x13)
+        opts = HANDICAPS.get(new_size, (0,))
+        set_handicap(opts[(opts.index(handicap_for(new_size)) + 1) % len(opts)])
+    else:
+        return False
+    return True
+
+
+def draw_setup(s, title):
+    """Kop van OFFLINE en LOCAL: titel, bordmaat, handicap en komi."""
+    retro.title(s, title)
+    hc = handicap_for(new_size)
+    komi = f"komi {OfflineGameScene.komi_for(hc):g}"
+    retro.subtitle(s, f"{{l}} {new_size}x{new_size} {{r}}  " + (f"{hc} stones - {komi}" if hc else
+                   f"even - {komi}"), PAL["accent"] if hc else None)
+
+
+def draw_engine_status(s, katago):
+    """Onderste regel rechts: laadbalk zolang KataGo laadt, anders no wifi."""
+    if katago and not gtp.is_warm():
+        if not load_bar(s, 236, retro.FOOT_Y, 80):
+            retro.status(s, "loading bot...")
+    else:
+        draw_nowifi(s)
+
+
+def local_engine_bot():
+    """KataGo-instelling voor een pot met z'n tweeën: alleen voor ko/zelfmoord, telling en review."""
+    return next((b for b in gtp.available() if b[1] == "katago"), None)
+
+
+def load_save(path):
     try:
-        with open(SAVE) as f:
+        with open(path) as f:
             return json.load(f)
     except Exception:
         return None
@@ -1039,7 +1090,7 @@ class OfflineScene:
 
     def __init__(self, back=None):
         self.back = back or NewGameScene
-        self.saved = load_offline()
+        self.saved = load_save(SAVE)
         gtp.preload(new_size)
         self.rows = ([("continue", None)] if self.saved else []) + \
                     [("bot", b) for b in gtp.available()]
@@ -1056,13 +1107,8 @@ class OfflineScene:
             self.sel = min(len(self.rows) - 1, self.sel + 1)
         elif ev.key == pygame.K_UP:
             self.sel = max(0, self.sel - 1)
-        elif ev.key in (pygame.K_LEFT, pygame.K_RIGHT):
-            i = BOARD_SIZES.index(new_size) + (1 if ev.key == pygame.K_RIGHT else -1)
-            set_size(BOARD_SIZES[i % len(BOARD_SIZES)])
-            gtp.preload(new_size)          # warme bot alvast naar deze maat
-        elif ev.key == X_KEY:              # handicap: even, 2, 3, ... (max 5 op 9x9, 9 op 13x13)
-            opts = HANDICAPS.get(new_size, (0,))
-            set_handicap(opts[(opts.index(handicap_for(new_size)) + 1) % len(opts)])
+        elif setup_keys(ev):
+            pass
         elif ev.key in A_KEYS and self.rows:
             kind, bot = self.rows[self.sel]
             if kind == "continue":
@@ -1073,11 +1119,7 @@ class OfflineScene:
 
     def draw(self, s):
         s.fill(PAL["screen"])
-        retro.title(s, "OFFLINE")
-        hc = handicap_for(new_size)
-        komi = f"komi {OfflineGameScene.komi_for(hc):g}"
-        retro.subtitle(s, f"{{l}} {new_size}x{new_size} {{r}}  " + (f"{hc} stones - {komi}" if hc else
-                       f"even - {komi}"), PAL["accent"] if hc else None)
+        draw_setup(s, "OFFLINE")
         if not self.rows:
             retro.text_c(s, "no engine installed", W // 2, 100, PAL["text_dim"])
         off = max(0, min(self.sel - 3, len(self.rows) - 7))      # 7 zichtbaar, scrollt
@@ -1090,16 +1132,37 @@ class OfflineScene:
             else:
                 retro.row(s, y, bot[0], gtp.level(bot), selected=sel)
         retro.foot(s, "{START} stats  {X} stones")
-        if any(b[1] == "katago" for _, b in self.rows if b) and not gtp.is_warm():
-            if not load_bar(s, 236, retro.FOOT_Y, 80):
-                retro.status(s, "loading bot...")
-        else:
-            draw_nowifi(s)
+        draw_engine_status(s, any(b[1] == "katago" for _, b in self.rows if b))
 
 
 class OfflineGameScene(GameScene):
     """Pot tegen een lokale engine; stand in conf/offline.json. Jouw kleur wordt bij een
-    nieuwe pot geloot; met handicap ben je zwart (de stenen zijn voor jou)."""
+    nieuwe pot geloot; met handicap ben je zwart (de stenen zijn voor jou).
+    LocalGameScene hergebruikt dit voor twee spelers via de haakjes hieronder."""
+    SAVE_PATH, SRC, HAS_BOT = SAVE, "off", True
+
+    @property
+    def opp_name(self):
+        return self.bot[0]
+
+    def _mover(self):
+        """Wie de knoppen bedient: hier altijd jij."""
+        return self.human
+
+    def _reply(self):
+        """Na jouw zet of pass: de bot speelt."""
+        self._bot_move()
+
+    def _status_msg(self, mine):
+        passed = bool(self.moves) and self.moves[-1][0] < 0
+        return ("The end." if self.result else "Bot passed" if mine and passed else
+                "Your move." if mine else "Thinking...")
+
+    def _leave(self):
+        if self.eng and self.eng.kind == "gnugo":     # KataGo blijft warm
+            threading.Thread(target=self.eng.close, daemon=True).start()
+        return OfflineScene()
+
     @staticmethod
     def komi_for(handicap):
         return 0.5 if handicap else 6.5     # altijd .5: judge.score rondt af op halve punten
@@ -1114,8 +1177,8 @@ class OfflineGameScene(GameScene):
             self.moves = [list(p) for p in review.handicap_stones(size, handicap)]
         self.board = [[0] * size for _ in range(size)]
         self.cx = self.cy = size // 2
-        self.human = 1 if handicap else human or random.choice((1, 2))
-        self.names = ("you", bot[0][:8]) if self.human == 1 else (bot[0][:8], "you")
+        self.human = 1 if handicap and self.HAS_BOT else human or random.choice((1, 2))
+        self.names = ("you", self.opp_name[:8]) if self.human == 1 else (self.opp_name[:8], "you")
         self.me_id, self.black_id = self.human, 1
         self.komi = self.komi_for(handicap)
         self.rules, self.speed = goban.RULES, "offline"
@@ -1132,7 +1195,7 @@ class OfflineGameScene(GameScene):
             self.eng = gtp.get_engine(self.bot[1], self.bot[2], self.size, self.komi)
             for i, (x, y) in enumerate(self.moves):
                 self.eng.play(goban.letter(goban.color_at(i, self.handicap)), x, y)
-            if self._turn() != self.human:
+            if self.HAS_BOT and self._turn() != self.human:
                 self._bot_move()
             elif self.can_review:
                 self.eng.eval_async()          # stand voor de mens alvast beoordelen (review)
@@ -1160,7 +1223,7 @@ class OfflineGameScene(GameScene):
             how = f"{sc[2:]} points"
         self.result = (winner, how)
         try:
-            os.remove(SAVE)
+            os.remove(self.SAVE_PATH)
         except OSError:
             pass
         self.review = self.analysing = None
@@ -1201,10 +1264,10 @@ class OfflineGameScene(GameScene):
                 self.review = {"error": "game too short"}
                 return
             ts = int(time.time())
-            r.update(size=self.size, bot=self.bot[0], opp_rank=opp_rank(self.bot[0]),
+            r.update(size=self.size, bot=self.opp_name, opp_rank=opp_rank(self.opp_name),
                      won=self.result[0] == self.human, human=self.human,
-                     date=time.strftime("%Y-%m-%d"), src="off", ts=ts)
-            analyse.store(f"off-{ts}", r, [list(m) for m in moves])
+                     date=time.strftime("%Y-%m-%d"), src=self.SRC, ts=ts)
+            analyse.store(f"{self.SRC}-{ts}", r, [list(m) for m in moves])
             self.review = r
         except Exception as ex:
             print("review:", ex)
@@ -1226,8 +1289,8 @@ class OfflineGameScene(GameScene):
     def _save(self):
         if self.result:
             return
-        os.makedirs(os.path.dirname(SAVE), exist_ok=True)
-        with open(SAVE, "w") as f:
+        os.makedirs(os.path.dirname(self.SAVE_PATH), exist_ok=True)
+        with open(self.SAVE_PATH, "w") as f:
             json.dump({"bot": self.bot[0], "size": self.size, "moves": self.moves,
                        "handicap": self.handicap, "human": self.human}, f)
 
@@ -1235,22 +1298,18 @@ class OfflineGameScene(GameScene):
         board, cb, cw, last = goban.from_moves(self.size, [m + [0] for m in self.moves], self.handicap)
         if len(self.moves) <= self.handicap:
             last = None                         # handicapstenen zijn geen 'laatste zet'
-        mine = self._turn() == self.human and not self.result
-        bot_passed = bool(self.moves) and self.moves[-1][0] < 0
+        mine = self._turn() == self._mover() and not self.result
         self._snap = dict(
             board=board, caps=(cb, cw), last=last, nmoves=len(self.moves),
             phase="finished" if self.result else "play",
             outcome=self.result[1] if self.result else "",
             winner_id=self.result[0] if self.result else None,
-            my_color=self.human, my_turn=mine, turn_color=self.human if mine else goban.other(self.human),
-            times=("", ""),
-            msg=("The end." if self.result else
-                 "Bot passed" if mine and bot_passed else
-                 "Your move." if mine else "Thinking..."))
+            my_color=self._mover(), my_turn=mine, turn_color=self._turn(),
+            times=("", ""), msg=self._status_msg(mine))
 
     def _do(self, action):
         try:
-            me = goban.letter(self.human)
+            me = goban.letter(self._mover())
             if action[0] == "move":
                 if not self.eng.play(me, action[1], action[2]):
                     self._load()
@@ -1258,16 +1317,16 @@ class OfflineGameScene(GameScene):
                     self.busy = False
                     return
                 self.moves.append([action[1], action[2]])
-                self._bot_move()
+                self._reply()
             elif action[0] == "pass":
                 self.eng.play(me, -1, -1)
                 self.moves.append([-1, -1])
                 if self._passes():
                     self._finish()
                 else:
-                    self._bot_move()
+                    self._reply()
             elif action[0] == "resign":
-                self._finish(goban.other(self.human), "Resignation")
+                self._finish(goban.other(self._mover()), "Resignation")
             self._save()
             self._load()
         except OSError as e:          # engine gestorven: opnieuw starten, zetten herspelen
@@ -1286,10 +1345,87 @@ class OfflineGameScene(GameScene):
     def review_scene(self):
         return GameReviewScene(self) if self.can_review else self.back()     # GNU Go: geen review
 
+
+class LocalScene:
+    """Met z'n tweeën op dit apparaat: bordmaat, handicap en jouw kleur, of de lopende pot hervatten."""
+
+    def __init__(self, back=None):
+        self.back = back or NewGameScene
+        self.saved = load_save(LOCAL_SAVE)
+        self.ok = local_engine_bot() is not None
+        gtp.preload(new_size)
+        self.rows = (([("continue", None)] if self.saved else []) + [("you", 1), ("you", 2)]) if self.ok else []
+        self.sel = 0
+
+    def handle(self, ev):
+        if ev.type != pygame.KEYDOWN:
+            return self
+        if ev.key in B_KEYS:
+            return self.back()
+        if ev.key == pygame.K_DOWN:
+            self.sel = min(len(self.rows) - 1, self.sel + 1)
+        elif ev.key == pygame.K_UP:
+            self.sel = max(0, self.sel - 1)
+        elif setup_keys(ev):
+            pass
+        elif ev.key in A_KEYS and self.rows:
+            kind, col = self.rows[self.sel]
+            if kind == "continue":
+                return resume_local(self.saved)
+            return LocalGameScene(new_size, handicap=handicap_for(new_size), human=col)
+        return self
+
+    def draw(self, s):
+        s.fill(PAL["screen"])
+        draw_setup(s, "LOCAL")
+        if not self.ok:
+            retro.text_c(s, "no engine installed", W // 2, 100, PAL["text_dim"])
+        hc = handicap_for(new_size)
+        for i, (kind, col) in enumerate(self.rows):
+            y, sel = retro.row_y(i), i == self.sel
+            if kind == "continue":
+                sv = self.saved
+                h = f" H{sv['handicap']}" if sv.get("handicap") else ""
+                retro.row(s, y, "CONTINUE", f"{sv['size']}x{sv['size']}{h}", selected=sel)
+            else:
+                if hc:                # zwart krijgt de stenen, wit begint daarna
+                    val = f"you +{hc}" if col == 1 else f"guest +{hc}"
+                else:
+                    val = "you start" if col == 1 else "guest starts"
+                retro.row(s, y, "YOU " + ("BLACK" if col == 1 else "WHITE"), val, selected=sel)
+        retro.foot(s, "{X} stones")
+        draw_engine_status(s, self.ok)
+
+
+class LocalGameScene(OfflineGameScene):
+    """Met z'n tweeën op één apparaat, om de beurt (de Flip doorgeven). KataGo doet geen zetten:
+    hij controleert ko en zelfmoord, telt aan het eind en beoordeelt de stellingen voor de review.
+    De review telt jouw kleur. Stand in conf/local.json."""
+    SAVE_PATH, SRC, HAS_BOT = LOCAL_SAVE, "local", False
+    opp_name = "guest"
+
+    def __init__(self, size, moves=None, handicap=0, human=1):
+        super().__init__(local_engine_bot(), size, moves, handicap, human)
+        self.speed = "local"
+
+    def _mover(self):
+        return self._turn()           # wie aan zet is, bedient de knoppen
+
+    def _reply(self):
+        if self.can_review:
+            self.eng.eval_async()     # stand voor de volgende zet alvast beoordelen (review)
+
+    def _status_msg(self, mine):
+        if self.result:
+            return "The end."
+        last = self.moves[-1] if len(self.moves) > self.handicap else None
+        if last and last[0] < 0:
+            return f"{'B' if goban.other(self._turn()) == 1 else 'W'} passed"
+        return f"{'Black' if self._turn() == 1 else 'White'} move"
+
     def _leave(self):
-        if self.eng and self.eng.kind == "gnugo":     # KataGo blijft warm
-            threading.Thread(target=self.eng.close, daemon=True).start()
-        return OfflineScene()
+        return LocalScene()
+
 
 TINT_GOOD, TINT_BAD = (214, 232, 204), (240, 214, 206)     # vlak onder de scorelijn
 X_KEY = pygame.K_r                 # knop X: overal wisselen tussen punten en procenten

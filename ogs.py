@@ -317,9 +317,9 @@ def _dur(sec):
 
 
 def time_label(speed):
-    """'3d + 1d per move' uit TIME_CONTROLS (voor NEW GAME)."""
+    """'3d + 1d' (start + per zet) uit TIME_CONTROLS, voor NEW GAME."""
     tc = TIME_CONTROLS[speed]
-    return f"{_dur(tc['initial_time'])} + {_dur(tc['time_increment'])} per move"
+    return f"{_dur(tc['initial_time'])} + {_dur(tc['time_increment'])}"
 
 
 # De OGS-bloemenladder (alfabetisch = oplopend in sterkte), ids via active-bots
