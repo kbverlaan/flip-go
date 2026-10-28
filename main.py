@@ -622,13 +622,7 @@ class HistoryScene:
                 analyse.worker.add(self._todo())
                 return self
             if row["key"] not in analyse.done_keys() and row.get("src") == "ogs":
-                st = analyse.worker.status.get(row["id"])
-                if not isinstance(st, float):  # vooraan in de rij (lopende analyse niet onderbreken)
-                    analyse.worker.queue[:] = [g for g in analyse.worker.queue if g != row["id"]]
-                    analyse.worker.status.pop(row["id"], None)
-                    analyse.worker.queue.insert(0, row["id"])
-                    analyse.worker.status[row["id"]] = "queued"
-                    analyse.worker.add([])
+                analyse.worker.first(row["id"])
             return GameReviewScene(PastGame(row, self))
         return self
 
@@ -694,6 +688,7 @@ class GameScene:
 
     def __init__(self, gid, back=None):
         self.gid = gid
+        self._ended = False      # einde al afgehandeld (analyse gestart)
         self.back = back or GamesScene
         self.size = 9
         self.cx = self.cy = 4
@@ -826,7 +821,9 @@ class GameScene:
         if self.menu is not None:
             return self._handle_menu(ev)
         if self.phase == "finished" and ev.key in A_KEYS + B_KEYS:
-            return self.back() if self.gid else TitleScene()
+            if not self.gid:
+                return TitleScene()
+            return self.review_scene() if ev.key in A_KEYS else self.back()
         if self.phase == "stone removal":
             if ev.key in A_KEYS:
                 self.busy = True
@@ -912,10 +909,25 @@ class GameScene:
         retro.text_r(s, self.times[color - 1], 312, y + 20,
                      PAL["text"] if to_move and self.phase == "play" else PAL["text_dim"])
 
+    def _game_over(self):
+        """OGS-pot klaar: de analyse begint meteen op de achtergrond, zoals na een offline pot."""
+        if self.gid:
+            analyse.worker.first(self.gid)
+
+    def review_scene(self):
+        """A na de pot: REVIEW (analysing met balk tot de achtergrond klaar is); B daar = terug hier."""
+        opp = self.names[1] if self.my_color == 1 else self.names[0]
+        row = {"key": f"ogs-{self.gid}", "id": self.gid, "opp": opp, "size": self.size,
+               "won": self.winner_id == self.me_id, "src": "ogs"}
+        return GameReviewScene(PastGame(row, self))
+
     def draw(self, s):
         if self._snap:               # atomaire overname van een verse load
             self.__dict__.update(self._snap)
             self._snap = None
+        if self.phase == "finished" and not self._ended:
+            self._ended = True
+            self._game_over()
         s.fill(PAL["screen"])
         n = self.size
         c, ox, oy, r = board_geom(n)
@@ -965,8 +977,7 @@ class GameScene:
             retro.text_c(s, "YOU WON" if won else "YOU LOST", 270, 112)
             retro.text_c(s, ogs.format_outcome(self.winner_id == self.black_id,
                                                self.outcome), 270, 132)
-            can_rev = self.can_review
-            retro.text_c(s, "A review" if can_rev else "A back" if self.speed == "offline" else "A games",
+            retro.text_c(s, "A back" if self.speed == "offline" and not self.can_review else "A review",
                          270, 156, PAL["text_dim"])
         elif self.phase == "stone removal" and not self.busy:
             retro.dialog_box(s, (224, 96, 92, 92))
@@ -1269,11 +1280,11 @@ class OfflineGameScene(GameScene):
             self._snap = {"msg": f"{action[0]} failed"[:10]}
         self.busy = False
 
-    def handle(self, ev):
-        if ev.type == pygame.KEYDOWN and self.phase == "finished" and ev.key in A_KEYS \
-                and self.can_review:
-            return GameReviewScene(self)
-        return super().handle(ev)
+    def _game_over(self):
+        pass                         # de review maakt _finish al
+
+    def review_scene(self):
+        return GameReviewScene(self) if self.can_review else self.back()     # GNU Go: geen review
 
     def _leave(self):
         if self.eng and self.eng.kind == "gnugo":     # KataGo blijft warm

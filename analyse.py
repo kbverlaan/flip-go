@@ -217,6 +217,16 @@ class Worker:
             self._thread = threading.Thread(target=self._run, daemon=True)
             self._thread.start()
 
+    def first(self, gid):
+        """Deze pot vooraan in de rij (HISTORY, einde van een OGS-pot); een lopende analyse
+        wordt niet onderbroken."""
+        if gid == self.cur or self.status.get(gid) == "done":
+            return
+        self.queue[:] = [g for g in self.queue if g != gid]
+        self.queue.insert(0, gid)
+        self.status[gid] = "queued"
+        self.add([])
+
     def busy(self):
         return bool(self.queue) or self.cur is not None
 
