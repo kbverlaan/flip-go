@@ -236,6 +236,7 @@ def _start_human(prof, size, abortable=False):
 _warm = None            # warme KataGo, gedeeld tussen potten
 _warm_lock = threading.Lock()
 _judge = None           # warme b6-scheidsrechter (zie judge.py)
+_games = 0              # aantal potten dat de warme KataGo kreeg (zie preload)
 
 
 def get_engine(kind, arg, size, komi):
@@ -245,9 +246,10 @@ def get_engine(kind, arg, size, komi):
         e = Engine(kind, arg)
         e.new_game(size, komi)
         return e
-    global _judge
+    global _judge, _games
     prof = arg
     with _warm_lock:
+        _games += 1
         if _warm is None or _warm.p.poll() is not None:
             _warm = _start_human(prof, size)
         try:
@@ -278,12 +280,16 @@ _want = None            # bordmaat waarop de warme KataGo klaar moet staan
 def preload(size=9):
     """KataGo alvast laden (bij openen van OFFLINE) of op de achtergrond naar de gekozen
     bordmaat omschakelen, zodat de eerste zet niet wacht. Wacht even: snel door de maten
-    bladeren start niet elke maat."""
+    bladeren start niet elke maat. Is er intussen een pot begonnen (bv. CONTINUE van een
+    9x9-pot terwijl 13x13 gekozen staat), dan blijft de engine van die pot: omschakelen
+    wist midden in de pot zijn bord, en de bot trekt dan zetten uit een ander bord
+    (willekeurig, soms een bezet punt)."""
     global _want
     if not any(b[1] == "katago" for b in available()):
         return
     first = _want is None
     _want = size
+    games = _games
 
     def go():
         global _warm
@@ -296,7 +302,7 @@ def preload(size=9):
                 ld.aborted = True       # nog aan het opstarten op een andere maat: opnieuw
                 ld.p.kill()             # beginnen is sneller dan afmaken + omschakelen
         with _warm_lock:
-            if _want != size:
+            if _want != size or _games != games:
                 return
             try:
                 if _warm is None or _warm.p.poll() is not None:
