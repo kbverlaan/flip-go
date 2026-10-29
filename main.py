@@ -918,6 +918,9 @@ class GameScene:
         retro.text_r(s, self.times[color - 1], 312, y + 20,
                      PAL["text"] if to_move and self.phase == "play" else PAL["text_dim"])
 
+    def _result_title(self, won):
+        return "YOU WON" if won else "YOU LOST"
+
     def _game_over(self):
         """OGS-pot klaar: de analyse begint meteen op de achtergrond, zoals na een offline pot."""
         if self.gid:
@@ -983,7 +986,7 @@ class GameScene:
         if self.phase == "finished" and self.gid:
             won = self.winner_id == self.me_id
             retro.dialog_box(s, (224, 96, 92, 92))
-            retro.text_c(s, "YOU WON" if won else "YOU LOST", 270, 112)
+            retro.text_c(s, self._result_title(won), 270, 112)
             retro.text_c(s, ogs.format_outcome(self.winner_id == self.black_id,
                                                self.outcome), 270, 132)
             retro.text_c(s, "A back" if self.speed == "offline" and not self.can_review else "A review",
@@ -1023,7 +1026,7 @@ def resume_offline(sv):
 
 
 def resume_local(sv):
-    return LocalGameScene(sv["size"], sv["moves"], sv.get("handicap", 0), sv.get("human", 1))
+    return LocalGameScene(sv["size"], sv["moves"], sv.get("handicap", 0))
 
 
 def setup_keys(ev):
@@ -1227,6 +1230,10 @@ class OfflineGameScene(GameScene):
         except OSError:
             pass
         self.review = self.analysing = None
+        self._after_finish()
+
+    def _after_finish(self):
+        """Na de pot: review op de achtergrond (LocalGameScene wacht tot je kiest welke kleur jij was)."""
         threading.Thread(target=self._make_review, daemon=True).start()
 
     def _make_review(self):
@@ -1347,14 +1354,15 @@ class OfflineGameScene(GameScene):
 
 
 class LocalScene:
-    """Met z'n tweeën op dit apparaat: bordmaat, handicap en jouw kleur, of de lopende pot hervatten."""
+    """Met z'n tweeën op dit apparaat: bordmaat en handicap, of de lopende pot hervatten. Wie zwart
+    speelt, spreek je aan tafel af; welke kleur jij was, kies je pas bij de review."""
 
     def __init__(self, back=None):
         self.back = back or NewGameScene
         self.saved = load_save(LOCAL_SAVE)
         self.ok = local_engine_bot() is not None
         gtp.preload(new_size)
-        self.rows = (([("continue", None)] if self.saved else []) + [("you", 1), ("you", 2)]) if self.ok else []
+        self.rows = (([("continue", None)] if self.saved else []) + [("start", None)]) if self.ok else []
         self.sel = 0
 
     def handle(self, ev):
@@ -1369,10 +1377,9 @@ class LocalScene:
         elif setup_keys(ev):
             pass
         elif ev.key in A_KEYS and self.rows:
-            kind, col = self.rows[self.sel]
-            if kind == "continue":
+            if self.rows[self.sel][0] == "continue":
                 return resume_local(self.saved)
-            return LocalGameScene(new_size, handicap=handicap_for(new_size), human=col)
+            return LocalGameScene(new_size, handicap=handicap_for(new_size))
         return self
 
     def draw(self, s):
@@ -1381,18 +1388,14 @@ class LocalScene:
         if not self.ok:
             retro.text_c(s, "no engine installed", W // 2, 100, PAL["text_dim"])
         hc = handicap_for(new_size)
-        for i, (kind, col) in enumerate(self.rows):
+        for i, (kind, _) in enumerate(self.rows):
             y, sel = retro.row_y(i), i == self.sel
             if kind == "continue":
                 sv = self.saved
                 h = f" H{sv['handicap']}" if sv.get("handicap") else ""
                 retro.row(s, y, "CONTINUE", f"{sv['size']}x{sv['size']}{h}", selected=sel)
-            else:
-                if hc:                # zwart krijgt de stenen, wit begint daarna
-                    val = f"you +{hc}" if col == 1 else f"guest +{hc}"
-                else:
-                    val = "you start" if col == 1 else "guest starts"
-                retro.row(s, y, "YOU " + ("BLACK" if col == 1 else "WHITE"), val, selected=sel)
+            else:                     # met handicap krijgt zwart de stenen en begint wit
+                retro.row(s, y, "START", f"black +{hc}" if hc else "black starts", selected=sel)
         retro.foot(s, "{X} stones")
         draw_engine_status(s, self.ok)
 
@@ -1400,13 +1403,32 @@ class LocalScene:
 class LocalGameScene(OfflineGameScene):
     """Met z'n tweeën op één apparaat, om de beurt (de Flip doorgeven). KataGo doet geen zetten:
     hij controleert ko en zelfmoord, telt aan het eind en beoordeelt de stellingen voor de review.
-    De review telt jouw kleur. Stand in conf/local.json."""
+    Na de pot kies je welke kleur jij was; die zetten telt de review. Stand in conf/local.json."""
     SAVE_PATH, SRC, HAS_BOT = LOCAL_SAVE, "local", False
     opp_name = "guest"
 
-    def __init__(self, size, moves=None, handicap=0, human=1):
-        super().__init__(local_engine_bot(), size, moves, handicap, human)
+    def __init__(self, size, moves=None, handicap=0):
+        super().__init__(local_engine_bot(), size, moves, handicap, human=1)   # 'jij' pas bij de review
         self.speed = "local"
+        self.names = ("black", "white")
+        self._reviewed = False
+
+    def _result_title(self, won):
+        return ("BLACK" if self.winner_id == 1 else "WHITE") + " WON"
+
+    def _after_finish(self):
+        pass                          # de review wacht tot je kiest welke kleur jij was
+
+    def review_scene(self):
+        if not self.can_review:
+            return self.back()
+        return GameReviewScene(self) if self._reviewed else LocalSideScene(self)
+
+    def review_as(self, col):
+        """Review voor de kleur die jij was (de stellingen zijn tijdens de pot al beoordeeld)."""
+        self.human, self._reviewed = col, True
+        threading.Thread(target=self._make_review, daemon=True).start()
+        return GameReviewScene(self)
 
     def _mover(self):
         return self._turn()           # wie aan zet is, bedient de knoppen
@@ -1425,6 +1447,33 @@ class LocalGameScene(OfflineGameScene):
 
     def _leave(self):
         return LocalScene()
+
+
+class LocalSideScene:
+    """Na een pot met z'n tweeën: welke kleur was jij? Die zetten telt de review."""
+
+    def __init__(self, game):
+        self.game, self.sel = game, 0
+
+    def handle(self, ev):
+        if ev.type != pygame.KEYDOWN:
+            return self
+        if ev.key in B_KEYS:
+            return self.game
+        if ev.key in (pygame.K_UP, pygame.K_DOWN):
+            self.sel = 1 - self.sel
+        elif ev.key in A_KEYS:
+            return self.game.review_as(self.sel + 1)
+        return self
+
+    def draw(self, s):
+        s.fill(PAL["screen"])
+        retro.title(s, "REVIEW")
+        retro.subtitle(s, "which side were you?")
+        for i, col in enumerate((1, 2)):
+            won = self.game.result and self.game.result[0] == col
+            retro.row(s, retro.row_y(i), "BLACK" if col == 1 else "WHITE", "won" if won else "lost",
+                      selected=i == self.sel)
 
 
 TINT_GOOD, TINT_BAD = (214, 232, 204), (240, 214, 206)     # vlak onder de scorelijn
@@ -1495,8 +1544,9 @@ class GameReviewScene:
         human = getattr(g, "human", 1)
         res = "won" if g.result and g.result[0] == human else "lost"
         retro.title(s, "REVIEW", data=True)
-        rk = (r or {}).get("opp_rank") or getattr(g, "row", {}).get("opp_rank") or opp_rank(g.bot[0])
-        opp = f"{g.bot[0][:14]} {rk}" if rk else g.bot[0]
+        name = getattr(g, "opp_name", None) or g.bot[0]
+        rk = (r or {}).get("opp_rank") or getattr(g, "row", {}).get("opp_rank") or opp_rank(name)
+        opp = f"{name[:14]} {rk}" if rk else name
         retro.text_c(s, f"vs {opp}  {g.size}x{g.size}  {res}", W // 2, 20, PAL["text_dim"])
         if r is None or r.get("error"):
             retro.text_c(s, r["error"] if r else "analysing", W // 2, 110, PAL["text_dim"])
@@ -1632,7 +1682,7 @@ class WalkScene:
         # zijpaneel
         retro.dialog_box(s, (224, 14, 92, 48))
         retro.text(s, f"#{t - self.H + 1} {_coord(played, n)}", 228, 20)
-        other = "opp" if self.r.get("src") == "ogs" else "bot"
+        other = "bot" if self.r.get("src", "off") == "off" else "opp"
         retro.text(s, ("you" if mine else other) + f"  {t - self.H + 1}/{self.T - self.H}", 228, 34, PAL["text_dim"])
         leads = self.r.get("leads") or []
         k = t - self.H + 1                              # stand na deze zet
