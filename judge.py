@@ -166,8 +166,19 @@ class JudgedEngine:
                 return m
         return items[-1][0] if items else None
 
+    def _resync(self):
+        """Bord van de humanlike-engine opnieuw opzetten uit deze pot. De engine is gedeeld
+        (warm tussen potten): loopt hij uit de pas, dan trekt de bot uit de policy van een
+        ander bord. Kost op de Mac 0,7 ms voor 67 zetten, naast ~90 ms voor de policy."""
+        if self.human.size != self.size:
+            self.human.new_game(self.size, self.komi)
+        self.human.cmd("clear_board")              # regels, komi en profiel blijven staan
+        for col, mv in self.moves:
+            self.human.cmd(f"play {col} {mv}")
+
     def genmove(self, color):
         t0 = time.monotonic()
+        self._resync()
         # scheidsrechter en humanlike-net zijn aparte processen: tegelijk laten rekenen
         pol = {}
         th = threading.Thread(target=lambda: pol.update(p=self._policy()))
