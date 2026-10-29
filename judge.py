@@ -201,8 +201,10 @@ class JudgedEngine:
             probs = pol["p"]
             t_pol = time.monotonic() - t0
             mv = self._draw(probs) if probs else "pass"
+        kans = pol.get("p", {}).get(mv)        # policy-kans van de gekozen zet: 'speelt hij raar?'
         print(f"judge: zet {len(self.moves)+1} root {t_root:.2f}s policy {t_pol:.2f}s "
-              f"totaal {time.monotonic()-t0:.2f}s", flush=True)
+              f"totaal {time.monotonic()-t0:.2f}s" + (f" kans {kans:.2f}" if kans is not None else ""),
+              flush=True)
         th.join()                              # policy-thread nooit laten hangen
         if mv == "pass":
             self.human.cmd(f"play {color} pass")
