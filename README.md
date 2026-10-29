@@ -13,9 +13,9 @@ with pygame.
   live game (9×9 or 13×13, ranked, Japanese rules), or challenge one of the OGS
   ladder bots. Move, pass, resign and accept the final count.
 - **Offline play.** A ladder of local opponents, KataGo's human-like network set to
-  25k, 20k, 15k, 10k and 5k. A small KataGo network acts as referee: it decides when
-  the bot passes or resigns. GNU Go is also available. Handicap games are supported,
-  and an unfinished game can be resumed.
+  25k, 20k, 15k, 14k, 13k, 11k, 10k and 5k. A small KataGo network acts as referee: it
+  decides when the bot passes or resigns. GNU Go is also available. Handicap games are
+  supported, and an unfinished game can be resumed.
 - **Review.** Finished games, online and offline, can be analysed on the device: score
   graph, a class per move (best to blunder), accuracy and mistake types, with a
   move-by-move walkthrough. A stats screen shows trends over recent games.

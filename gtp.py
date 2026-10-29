@@ -15,14 +15,17 @@ from paths import CONF, ENG, ENGINE_LOG
 # Offline tegenstanders: (label, kind, arg). gnugo-arg = level, katago-arg = human-profiel.
 # Bergnamen = MiniGo-bergenladder (humanlike-net speelt als een mens van die rank).
 # Laagste geldige profiel is 20k: een onbekend profiel (preaz_25k) laat KataGo crashen.
-# Treden van 5 kyu (27 okt 2026). Bot tegen bot gemeten (900 potten 13x13): elke trede wint
-# ruim van de vorige.
+# Bot tegen bot gemeten (27 okt 2026, 900 potten 13x13; niveau achter de trede, ±2-3 kyu).
+# Tussen Mont Blanc en Kilimanjaro zat ~8 kyu: daar drie tussentreden (29 okt, niet gemeten).
 BOTS = (
-    ("Vaalserberg", "katago", "preaz_25k"),   # vereist gepatchte KataGo (21k-30k)
-    ("Zugspitze", "katago", "preaz_20k"),
-    ("Mont Blanc", "katago", "preaz_15k"),
-    ("Kilimanjaro", "katago", "preaz_10k"),
-    ("K2", "katago", "preaz_5k"),
+    ("Vaalserberg", "katago", "preaz_25k"),   # ~22k; vereist gepatchte KataGo (21k-30k)
+    ("Zugspitze", "katago", "preaz_20k"),     # ~17k
+    ("Mont Blanc", "katago", "preaz_15k"),    # ~14k
+    ("Kazbek", "katago", "preaz_14k"),        # niet gemeten
+    ("Ararat", "katago", "preaz_13k"),        # niet gemeten
+    ("Elbrus", "katago", "preaz_11k"),        # niet gemeten
+    ("Kilimanjaro", "katago", "preaz_10k"),   # ~7k
+    ("K2", "katago", "preaz_5k"),             # ~3k
     ("GNU Go 5", "gnugo", 5),
     ("GNU Go 10", "gnugo", 10),
 )
